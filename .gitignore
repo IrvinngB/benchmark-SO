@@ -135,6 +135,16 @@ Thumbs.db
 
 # Project specific
 benchmark_results/
+benchmark_results_improved/
+benchmark_results_baseline/
 *.json
 *.csv
+*.txt
 logs/
+evidencia/
+RESULTADOS*
+analysis_improved*
+CONCLUSIONES*
+RESUMEN*
+QUICKSTART*
+BENCHMARK_CONFIG*

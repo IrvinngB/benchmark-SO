@@ -1,11 +1,7 @@
-"""
-FastAPI Performance Testing Application
-Endpoints para benchmarking en VPS (Docker vs Bare Metal)
-"""
 import logging
 import asyncio
 import math
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
 # Configurar logging
@@ -115,12 +111,66 @@ async def async_light():
 
 
 @app.get("/json-large")
-async def json_large():
+async def json_large(page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=200)):
     """
-    Endpoint que retorna un JSON grande.
-    Mide capacidad de serialización y transferencia de datos.
+    Endpoint que retorna JSON con paginación.
+    MEJORADO: Ahora soporta paginación para mejor rendimiento.
+    
+    Parámetros:
+    - page: número de página (default: 1)
+    - limit: items por página (default: 50, máximo: 200)
+    
+    Ejemplo: /json-large?page=1&limit=50
     """
-    logger.info("Processing large JSON request")
+    logger.info(f"Processing paginated JSON request - page: {page}, limit: {limit}")
+    
+    total_items = 1000
+    start_idx = (page - 1) * limit
+    end_idx = min(start_idx + limit, total_items)
+    
+    # Generar lista de datos solo para la página solicitada
+    data = []
+    for i in range(start_idx, end_idx):
+        data.append({
+            "id": i,
+            "name": f"Item {i}",
+            "value": i * 3.14159,
+            "description": f"Description for item number {i} with some additional text",
+            "metadata": {
+                "created": "2025-11-01",
+                "updated": "2025-11-01",
+                "tags": [f"tag{j}" for j in range(5)]
+            }
+        })
+    
+    # Calcular información de paginación
+    total_pages = (total_items + limit - 1) // limit
+    has_next = page < total_pages
+    has_prev = page > 1
+    
+    return {
+        "status": "success",
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total_items": total_items,
+            "total_pages": total_pages,
+            "has_next": has_next,
+            "has_prev": has_prev
+        },
+        "count": len(data),
+        "items": data
+    }
+
+
+@app.get("/json-large-full")
+async def json_large_full():
+    """
+    Endpoint original que retorna TODO el JSON sin paginación.
+    (Mantenido para compatibilidad histórica)
+    ADVERTENCIA: Bajo rendimiento, usar /json-large con paginación en su lugar.
+    """
+    logger.warning("Using /json-large-full endpoint - consider using /json-large with pagination")
     
     # Generar lista grande de datos
     data = []
