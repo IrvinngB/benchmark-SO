@@ -1,0 +1,20 @@
+# FastAPI Performance Testing - Dependencies para Linux/Unix
+# Versiones específicas para reproducibilidad
+# USO: pip install -r requirements-linux.txt
+
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# ASGI Server - Optimizaciones para Linux
+uvloop==0.19.0  # Event loop optimizado para Linux
+httptools==0.6.1  # Parser HTTP rápido
+
+# Utilidades
+python-dotenv==1.0.0  # Manejo de variables de entorno
+pydantic==2.5.0  # Validación de datos (versión completa para Linux)
+pydantic-settings==2.1.0  # Settings management
+
+# Logging y Monitoreo (opcional)
+# python-json-logger==2.0.7  # Structured logging
+# prometheus-client==0.19.0  # Métricas Prometheus

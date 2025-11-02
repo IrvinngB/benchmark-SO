@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  fastapi-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi-performance-test
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_NAME=FastAPI Performance Testing
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    # Recursos limitados para testing (ajustar según necesidad)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+# Para extensiones futuras (descomentar si se necesita)
+# networks:
+#   fastapi-network:
+#     driver: bridge
+
+# volumes:
+#   app-data:
