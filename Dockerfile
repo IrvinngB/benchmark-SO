@@ -1,14 +1,15 @@
 # FastAPI Performance Testing - Dockerfile
 # Multi-stage build para optimización de tamaño
+# Optimizado para Python 3.10 LTS
 
 # Stage 1: Builder
-FROM python:3.11-slim as builder
+FROM python:3.10-slim as builder
 
 # Establecer directorio de trabajo
 WORKDIR /app
 
 # Copiar solo requirements para aprovechar cache de Docker
-COPY requirements.txt .
+COPY requirements-linux.txt ./requirements.txt
 
 # Instalar dependencias en entorno virtual
 RUN python -m venv /opt/venv
@@ -17,7 +18,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 # Metadatos
 LABEL maintainer="Performance Testing Team"

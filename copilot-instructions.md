@@ -159,8 +159,8 @@ sudo sh get-docker.sh
 sudo apt install python3-pip python3-venv -y
 
 # 4. Clonar repositorio
-git clone <repo-url>
-cd fastapi-performance-test
+git clone https://github.com/IrvinngB/benchmark-SO.git
+cd SistemasOperativos
 
 # 5. Crear entorno virtual
 python3 -m venv venv
