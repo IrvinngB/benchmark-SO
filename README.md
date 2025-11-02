@@ -13,6 +13,15 @@ Este proyecto proporciona una aplicación FastAPI con múltiples endpoints dise�
 - ✅ Identificar cuellos de botella en diferentes escenarios
 - ✅ Establecer best practices para deployment en producción
 
+## 🔗 Repositorio
+
+**GitHub**: https://github.com/IrvinngB/benchmark-SO.git
+
+```bash
+git clone https://github.com/IrvinngB/benchmark-SO.git
+cd benchmark-SO
+```
+
 ## 🏗️ Estructura del Proyecto
 
 ```
@@ -20,8 +29,12 @@ fastapi-performance-test/
 ├── app/
 │   ├── __init__.py
 │   └── main.py              # Aplicación FastAPI
-├── requirements.txt         # Dependencias Python
+├── requirements.txt         # Dependencias Python (Windows)
+├── requirements-linux.txt   # Dependencias Python (Linux/VPS)
 ├── Dockerfile              # Imagen Docker optimizada
+├── compare-docker-bare.sh  # Script de comparación (Linux/Mac)
+├── compare-docker-bare.ps1 # Script de comparación (Windows)
+├── benchmark-local.ps1     # Script de benchmark local
 ├── .dockerignore           # Exclusiones Docker
 ├── .gitignore              # Exclusiones Git
 ├── README.md               # Esta documentación
@@ -42,7 +55,7 @@ fastapi-performance-test/
 
 ### Prerrequisitos
 
-- Python 3.11+
+- Python 3.10+ (recomendado 3.10 LTS)
 - pip
 - Docker (opcional, para pruebas containerizadas)
 - VPS con Ubuntu 22.04+ (DigitalOcean, AWS, etc.)
@@ -51,8 +64,8 @@ fastapi-performance-test/
 
 ```bash
 # Clonar repositorio
-git clone <repo-url>
-cd SistemasOperativos
+git clone https://github.com/IrvinngB/benchmark-SO.git
+cd benchmark-SO
 
 # Crear entorno virtual
 python -m venv venv
@@ -87,8 +100,8 @@ Documentación interactiva: `http://localhost:8000/docs`
 sudo apt install python3-pip python3-venv -y
 
 # Clonar repositorio
-git clone <repo-url>
-cd SistemasOperativos
+git clone https://github.com/IrvinngB/benchmark-SO.git
+cd benchmark-SO
 
 # Crear entorno virtual
 python3 -m venv venv
@@ -109,8 +122,8 @@ curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 
 # Clonar repositorio
-git clone <repo-url>
-cd SistemasOperativos
+git clone https://github.com/IrvinngB/benchmark-SO.git
+cd benchmark-SO
 
 # Build imagen
 docker build -t fastapi-perf:latest .
@@ -143,32 +156,48 @@ chmod +x hey_linux_amd64
 sudo mv hey_linux_amd64 /usr/local/bin/hey
 ```
 
-### Ejecutar Benchmarks
+### Ejecutar Benchmarks desde Máquina Local (Recomendado)
 
-#### Test Endpoint Ligero
+**Para pruebas más realistas**, ejecuta los benchmarks desde tu máquina local hacia los droplets remotos. Esto mide el rendimiento end-to-end incluyendo latencia de red.
 
-```bash
-# 30 segundos, 100 conexiones concurrentes, 4 threads
-wrk -t4 -c100 -d30s http://localhost:8000/
+#### Instalar Herramientas en tu Máquina Local
 
-# Desde máquina externa (reemplazar IP)
-wrk -t4 -c100 -d30s http://YOUR_VPS_IP:8000/
+**Windows (PowerShell):**
+```powershell
+# Instalar bombardier (recomendado)
+# Descargar desde: https://github.com/codesenberg/bombardier/releases
+# O usar el script incluido
+.\benchmark-local.ps1 -ServerHost "TU_DROPLET_IP:8000"
 ```
 
-#### Test Endpoint Pesado
-
+**Linux/Mac:**
 ```bash
-wrk -t4 -c100 -d30s http://localhost:8000/heavy
+# Instalar wrk
+sudo apt install wrk  # Ubuntu/Debian
+# o
+brew install wrk      # macOS
+
+# Ejecutar benchmarks
+wrk -t4 -c100 -d30s http://TU_DROPLET_IP:8000/
 ```
 
-#### Test con hey
+#### Comparación Docker vs Bare Metal
 
 ```bash
-# 10,000 requests, 50 concurrentes
-hey -n 10000 -c 50 http://localhost:8000/
+# Benchmark al droplet SIN Docker
+echo "=== BENCHMARK BARE METAL ==="
+wrk -t4 -c100 -d30s http://BARE_METAL_IP:8000/
+wrk -t4 -c100 -d30s http://BARE_METAL_IP:8000/heavy
 
-# Con timeout personalizado
-hey -n 10000 -c 50 -t 5 http://localhost:8000/heavy
+# Benchmark al droplet CON Docker
+echo "=== BENCHMARK DOCKER ==="
+wrk -t4 -c100 -d30s http://DOCKER_IP:8000/
+wrk -t4 -c100 -d30s http://DOCKER_IP:8000/heavy
+
+# Comparar latencia de red
+echo "=== LATENCY TEST ==="
+ping BARE_METAL_IP
+ping DOCKER_IP
 ```
 
 ### Monitoreo de Recursos Durante Tests
@@ -187,35 +216,119 @@ docker stats fastapi-app
 sudo iftop
 ```
 
-## 📈 Métricas a Recolectar
+## � Metodología de Benchmarking Recomendada
 
-### Rendimiento
+### 1. Configuración de Pruebas
+- **Cliente**: Tu máquina local (Windows/Linux/Mac)
+- **Servidores**: 2 droplets de DigitalOcean (uno bare metal, uno Docker)
+- **Herramienta**: wrk o bombardier (desde máquina local)
+- **Duración**: 30-60 segundos por test
+- **Conexiones**: 50-100 concurrentes
+- **Repeticiones**: 3-5 veces por endpoint
 
-- **Requests por segundo (RPS)**: Throughput total
-- **Latencia promedio**: Tiempo de respuesta medio
-- **Latencia P50**: Mediana (50% de requests)
-- **Latencia P95**: 95% de requests más rápidos
-- **Latencia P99**: 99% de requests más rápidos
-- **Errores**: Timeouts, 5xx, conexiones rechazadas
+### 2. Endpoints a Probar
+```bash
+# 1. Baseline (medir throughput máximo)
+wrk -t4 -c100 -d30s http://DROPLET_IP:8000/
 
-### Recursos del Sistema
+# 2. Health check (operación ligera)
+wrk -t4 -c100 -d30s http://DROPLET_IP:8000/health
 
-- **CPU**: % de uso durante prueba
-- **RAM**: MB consumidos
-- **Network I/O**: Tráfico de red
-- **Disk I/O**: Lectura/escritura (si aplica)
+# 3. CPU intensivo (bottleneck de procesamiento)
+wrk -t4 -c50 -d30s http://DROPLET_IP:8000/heavy
 
-### Comparación Docker vs Bare Metal
+# 4. JSON grande (bottleneck de serialización)
+wrk -t4 -c20 -d30s http://DROPLET_IP:8000/json-large
+```
 
-Crear tabla comparativa:
+### 3. Métricas a Recolectar
+- **Requests/sec**: Throughput principal
+- **Latencia promedio**: P50, P95, P99
+- **Errores**: Timeouts, conexiones fallidas
+- **CPU/RAM**: En el servidor durante las pruebas
+- **Red**: Latencia base con ping
 
-| Métrica | Sin Docker | Con Docker | Diferencia |
-|---------|-----------|-----------|-----------|
-| RPS | X req/s | Y req/s | Z% |
-| Latencia P50 | X ms | Y ms | Z% |
-| Latencia P95 | X ms | Y ms | Z% |
-| CPU promedio | X% | Y% | Z% |
-| RAM usada | X MB | Y MB | Z MB |
+### 4. Comparación Docker vs Bare Metal
+```bash
+# Script de comparación
+echo "=== COMPARACIÓN DOCKER VS BARE METAL ===" > comparacion.txt
+echo "Fecha: $(date)" >> comparacion.txt
+echo "" >> comparacion.txt
+
+# Ping test (latencia de red)
+echo "PING BARE METAL:" >> comparacion.txt
+ping -c 5 BARE_METAL_IP >> comparacion.txt
+echo "" >> comparacion.txt
+
+echo "PING DOCKER:" >> comparacion.txt
+ping -c 5 DOCKER_IP >> comparacion.txt
+echo "" >> comparacion.txt
+
+# Benchmarks (ejecutar múltiples veces)
+for i in {1..3}; do
+    echo "=== RUN $i ===" >> comparacion.txt
+    
+    echo "BARE METAL - Baseline:" >> comparacion.txt
+    wrk -t4 -c100 -d10s http://BARE_METAL_IP:8000/ >> comparacion.txt
+    
+    echo "DOCKER - Baseline:" >> comparacion.txt
+    wrk -t4 -c100 -d10s http://DOCKER_IP:8000/ >> comparacion.txt
+    
+    echo "BARE METAL - Heavy:" >> comparacion.txt
+    wrk -t4 -c50 -d10s http://BARE_METAL_IP:8000/heavy >> comparacion.txt
+    
+    echo "DOCKER - Heavy:" >> comparacion.txt
+    wrk -t4 -c50 -d10s http://DOCKER_IP:8000/heavy >> comparacion.txt
+done
+```
+
+### 5. Script Automatizado
+
+Para facilitar la comparación, usa los scripts incluidos según tu sistema operativo:
+
+**Windows PowerShell:**
+```powershell
+# Ejecutar comparación automatizada
+.\compare-docker-bare.ps1 -BareMetalIP "IP_DROPLET_BARE" -DockerIP "IP_DROPLET_DOCKER" -Runs 3
+```
+
+**Linux/Mac (Bash):**
+```bash
+# Hacer ejecutable el script
+chmod +x compare-docker-bare.sh
+
+# Ejecutar comparación automatizada
+./compare-docker-bare.sh -b IP_DROPLET_BARE -d IP_DROPLET_DOCKER -r 3
+```
+
+**Ambos scripts:**
+- ✅ Verifican conectividad de ambos droplets
+- ✅ Ejecutan múltiples runs para mayor precisión
+- ✅ Guardan resultados en archivo de texto con timestamp
+- ✅ Muestran resumen de Requests/sec
+- ✅ Incluyen consejos de análisis
+
+## 🤔 ¿Por qué ejecutar desde máquina local?
+
+Ejecutar los benchmarks desde tu máquina local hacia los droplets remotos es **muy superior** que hacerlo desde el mismo VPS:
+
+### ✅ Ventajas de benchmarks remotos:
+- **Realismo**: Simula cómo los usuarios reales acceden a tu aplicación
+- **Latencia de red**: Mide el impacto real de la red en el rendimiento
+- **Sin interferencia**: El VPS puede dedicar todos sus recursos a la aplicación
+- **Condiciones reales**: Pruebas end-to-end incluyendo red, DNS, etc.
+- **Escalabilidad**: Puedes probar desde múltiples ubicaciones geográficas
+
+### ❌ Problemas de benchmarks locales:
+- **Sin latencia de red**: Resultados irreales para aplicaciones web
+- **Interferencia**: El proceso de benchmarking consume recursos del mismo servidor
+- **Loopback**: Conexiones localhost no representan el uso real
+- **CPU compartido**: Benchmark y aplicación compiten por CPU
+
+### 📊 Diferencias típicas observadas:
+- **Latencia**: +10-50ms adicionales por salto de red
+- **Throughput**: 5-15% menos por overhead de red
+- **Realismo**: 100% más representativo del uso real
 
 ## 🔐 Configuración de Seguridad en VPS
 
