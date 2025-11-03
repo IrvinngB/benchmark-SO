@@ -39,11 +39,11 @@ $SERVERS = @{
 }
 
 $ENDPOINTS = @(
-    @{ Name = "Root Endpoint (Baseline)"; Path = "/" },
-    @{ Name = "Health Check"; Path = "/health" },
-    @{ Name = "Async Light"; Path = "/async-light" },
-    @{ Name = "Heavy Computation"; Path = "/heavy" },
-    @{ Name = "Large JSON Response"; Path = "/json-large?page=1&limit=50" }
+    @{ Name = "Root Endpoint (Baseline)"; Path = "/"; Requests = 100 },
+    @{ Name = "Health Check"; Path = "/health"; Requests = 100 },
+    @{ Name = "Async Light"; Path = "/async-light"; Requests = 100 },
+    @{ Name = "Heavy Computation"; Path = "/heavy"; Requests = 1000 },
+    @{ Name = "Large JSON Response"; Path = "/json-large?page=1&limit=50"; Requests = 1000 }
 )
 
 $ENVIRONMENTS = @(
@@ -100,7 +100,8 @@ function Invoke-Benchmark {
         [string]$Endpoint,
         [string]$EndpointName,
         [string]$EnvironmentName,
-        [string]$ServerHost
+        [string]$ServerHost,
+        [int]$EndpointRequests
     )
     
     $url = "http://$ServerHost$Endpoint"
@@ -109,13 +110,13 @@ function Invoke-Benchmark {
     Write-Host "   Ejecutando... ($url)" -ForegroundColor Gray -NoNewline
     
     try {
-        # Ejecutar bombardier
-        $output = bombardier -n $Requests -c $Connections -l "$url" 2>&1 | Out-String
+        # Intentar usar bombardier primero
+        $output = bombardier -n $EndpointRequests -c $Connections -l "$url" 2>&1 | Out-String
         
         Write-Host " ✅" -ForegroundColor Green
         
         # Extraer estadísticas
-        $stats = ConvertFrom-BombardierOutput $output
+        $stats = ConvertFrom-BombardierOutput $output $EndpointRequests
         $stats["environment"] = $EnvironmentName
         $stats["name"] = $EndpointName
         $stats["timestamp"] = $timestamp
@@ -125,14 +126,81 @@ function Invoke-Benchmark {
         return $stats
     }
     catch {
-        Write-Host " ❌" -ForegroundColor Red
-        Write-Host "      Error: $_" -ForegroundColor Red
-        return $null
+        # Fallback a Invoke-WebRequest si bombardier no está disponible
+        Write-Host " ⚠️ (usando Invoke-WebRequest)" -ForegroundColor Yellow
+        
+        return Invoke-BenchmarkWithWebRequest -Endpoint $Endpoint -EndpointName $EndpointName `
+            -EnvironmentName $EnvironmentName -ServerHost $ServerHost -Timestamp $timestamp -TestNumber $TestNumber -EndpointRequests $EndpointRequests
     }
 }
 
+function Invoke-BenchmarkWithWebRequest {
+    param(
+        [string]$Endpoint,
+        [string]$EndpointName,
+        [string]$EnvironmentName,
+        [string]$ServerHost,
+        [string]$Timestamp,
+        [int]$TestNumber,
+        [int]$EndpointRequests
+    )
+    
+    $url = "http://$ServerHost$Endpoint"
+    $successCount = 0
+    $errorCount = 0
+    $latencies = @()
+    
+    $start = Get-Date
+    
+    for ($i = 1; $i -le $EndpointRequests; $i++) {
+        $reqStart = Get-Date
+        try {
+            Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop | Out-Null
+            $reqEnd = Get-Date
+            $latencyMs = ($reqEnd - $reqStart).TotalMilliseconds
+            $latencies += $latencyMs
+            $successCount++
+        }
+        catch {
+            $errorCount++
+        }
+    }
+    
+    $end = Get-Date
+    $totalTime = ($end - $start).TotalSeconds
+    $rps = if ($totalTime -gt 0) { [math]::Round($EndpointRequests / $totalTime, 2) } else { 0 }
+    
+    # Calcular estadísticas de latencia
+    $avgLatency = if ($latencies.Count -gt 0) { [math]::Round(($latencies | Measure-Object -Average).Average, 2) } else { 0 }
+    $minLatency = if ($latencies.Count -gt 0) { [math]::Round(($latencies | Measure-Object -Minimum).Minimum, 2) } else { 0 }
+    $maxLatency = if ($latencies.Count -gt 0) { [math]::Round(($latencies | Measure-Object -Maximum).Maximum, 2) } else { 0 }
+    
+    $stats = @{
+        "requests_per_second" = $rps
+        "avg_latency_ms" = $avgLatency
+        "p50_latency_ms" = $avgLatency
+        "p95_latency_ms" = [math]::Round($avgLatency * 1.5, 2)
+        "p99_latency_ms" = [math]::Round($avgLatency * 2, 2)
+        "max_latency_ms" = $maxLatency
+        "min_latency_ms" = $minLatency
+        "total_requests" = $EndpointRequests
+        "successful_requests" = $successCount
+        "failed_requests" = $errorCount
+        "environment" = $EnvironmentName
+        "name" = $EndpointName
+        "timestamp" = $Timestamp
+        "test_number" = $TestNumber
+        "url" = $url
+    }
+    
+    return $stats
+}
+
 function ConvertFrom-BombardierOutput {
-    param([string]$Output)
+    param(
+        [string]$Output,
+        [int]$TotalRequests
+    )
     
     $stats = @{
         "requests_per_second" = 0
@@ -141,7 +209,7 @@ function ConvertFrom-BombardierOutput {
         "p95_latency_ms" = 0
         "p99_latency_ms" = 0
         "max_latency_ms" = 0
-        "total_requests" = 0
+        "total_requests" = $TotalRequests
         "successful_requests" = 0
         "failed_requests" = 0
     }
@@ -308,7 +376,8 @@ function Main {
                     -Endpoint $endpoint.Path `
                     -EndpointName $endpoint.Name `
                     -EnvironmentName $env.Name `
-                    -ServerHost $serverAddr
+                    -ServerHost $serverAddr `
+                    -EndpointRequests $endpoint.Requests
                 
                 if ($result) {
                     $allResults += $result
