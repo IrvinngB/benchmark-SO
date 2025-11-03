@@ -56,7 +56,7 @@ class BenchmarkConfig:
     default_requests: int = 100
     default_connections: int = 50
     timeout: int = 30
-    results_dir: str = "benchmark_results_python"
+    results_dir: str = "resultados_muestra"
     
     servers: Dict[str, str] = None
     endpoints: List[Dict] = None
@@ -761,8 +761,8 @@ def main():
                        help='Requests por endpoint ligero (default: 100)')
     parser.add_argument('--timeout', type=int, default=30,
                        help='Timeout por request en segundos (default: 30)')
-    parser.add_argument('--output', '-o', type=str, default='benchmark_results_python',
-                       help='Directorio de resultados (default: benchmark_results_python)')
+    parser.add_argument('--output', '-o', type=str, default='resultados_muestra',
+                       help='Directorio de resultados (default: resultados_muestra)')
     parser.add_argument('--dashboard', '-d', action='store_true',
                        help='Iniciar dashboard web en puerto 5000')
     parser.add_argument('--verbose', '-v', action='store_true', default=True,
@@ -797,7 +797,7 @@ def main():
             analyzer.create_visualizations(df, timestamp)
             report = analyzer.generate_report(df, timestamp)
             
-            console.print("[green]✅ Análisis completado[/green]")
+            console.print("[green]✅ Análisis completado - Resultados en: resultados_muestra/[/green]")
         else:
             console.print("[red]❌ No se encontraron archivos CSV en el directorio[/red]")
         return
@@ -827,7 +827,13 @@ def main():
                 report = analyzer.generate_report(df, timestamp)
                 
                 console.print(f"\n[bold green]✅ Benchmark completado exitosamente[/bold green]")
-                console.print(f"📁 Resultados guardados en: {config.results_dir}/")
+                console.print(f"📁 Resultados guardados en: resultados_muestra/")
+                console.print(f"📊 Archivos generados:")
+                console.print(f"   - CSV detallado con todas las métricas")
+                console.print(f"   - JSON estructurado para análisis")
+                console.print(f"   - Excel con múltiples hojas y análisis automático")
+                console.print(f"   - Reporte Markdown")
+                console.print(f"   - Gráficos profesionales en carpeta visualizations_*")
                 
                 # Mostrar resumen rápido
                 console.print("\n[bold cyan]📈 Resumen Rápido:[/bold cyan]")
