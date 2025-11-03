@@ -105,5 +105,4 @@ PyYAML>=6.0                     # Configuración en YAML
 # EXTRAS - Utilidades adicionales
 # ============================================================================
 humanize>=4.6.0                 # Formateo human-readable de números
-dateutil>=2.8.0                 # Utilidades de fechas
-python-dateutil>=2.8.0         # Parsing de fechas avanzado
+python-dateutil>=2.8.0          # Parsing de fechas avanzado
