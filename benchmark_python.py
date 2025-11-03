@@ -52,11 +52,11 @@ warnings.filterwarnings('ignore')
 @dataclass
 class BenchmarkConfig:
     """Configuración del benchmark"""
-    num_tests: int = 6
-    default_requests: int = 100
-    default_connections: int = 50
-    timeout: int = 30
-    results_dir: str = "resultados_muestra"
+    num_tests: int = 10
+    default_requests: int = 500
+    default_connections: int = 100
+    timeout: int = 60
+    results_dir: str = "benchmark_escalado"
     
     servers: Dict[str, str] = None
     endpoints: List[Dict] = None
@@ -72,11 +72,11 @@ class BenchmarkConfig:
         
         if self.endpoints is None:
             self.endpoints = [
-                {"name": "Root Endpoint (Baseline)", "path": "/", "requests": 100},
-                {"name": "Health Check", "path": "/health", "requests": 100},
-                {"name": "Async Light", "path": "/async-light", "requests": 100},
-                {"name": "Heavy Computation", "path": "/heavy", "requests": 1000},
-                {"name": "Large JSON Response", "path": "/json-large?page=1&limit=50", "requests": 1000}
+                {"name": "Root Endpoint (Baseline)", "path": "/", "requests": 500},
+                {"name": "Health Check", "path": "/health", "requests": 500},
+                {"name": "Async Light", "path": "/async-light", "requests": 750},
+                {"name": "Heavy Computation", "path": "/heavy", "requests": 2000},
+                {"name": "Large JSON Response", "path": "/json-large?page=1&limit=50", "requests": 1500}
             ]
         
         if self.environments is None:
@@ -584,8 +584,8 @@ class BenchmarkUI:
         """Muestra el header del benchmark"""
         self.console.print(Panel.fit(
             "[bold cyan]🚀 FastAPI Performance Benchmark - Python Edition[/bold cyan]\n\n"
-            f"📊 Ejecutando {config.num_tests} pruebas por entorno\n"
-            f"🎯 Total de pruebas: {config.num_tests * len(config.endpoints) * len(config.environments)}\n"
+            f"📊 Ejecutando {config.num_tests} pruebas por entorno (ESCALADO)\n"
+            f"🎯 Total de pruebas: {config.num_tests * len(config.endpoints) * len(config.environments)} (modo ALTO VOLUMEN)\n"
             f"⚡ Motor: AsyncIO + aiohttp\n"
             f"📈 Monitoreo: CPU, RAM, Network en tiempo real",
             title="Benchmark Configuration",
@@ -753,16 +753,16 @@ def create_live_dashboard():
 def main():
     parser = argparse.ArgumentParser(description="FastAPI Performance Benchmark - Python Edition")
     
-    parser.add_argument('--tests', '-t', type=int, default=6,
-                       help='Número de pruebas por entorno (default: 6)')
-    parser.add_argument('--connections', '-c', type=int, default=50,
-                       help='Conexiones concurrentes (default: 50)')
-    parser.add_argument('--requests', '-r', type=int, default=100,
-                       help='Requests por endpoint ligero (default: 100)')
-    parser.add_argument('--timeout', type=int, default=30,
-                       help='Timeout por request en segundos (default: 30)')
-    parser.add_argument('--output', '-o', type=str, default='resultados_muestra',
-                       help='Directorio de resultados (default: resultados_muestra)')
+    parser.add_argument('--tests', '-t', type=int, default=10,
+                       help='Número de pruebas por entorno (default: 10)')
+    parser.add_argument('--connections', '-c', type=int, default=100,
+                       help='Conexiones concurrentes (default: 100)')
+    parser.add_argument('--requests', '-r', type=int, default=500,
+                       help='Requests por endpoint ligero (default: 500)')
+    parser.add_argument('--timeout', type=int, default=60,
+                       help='Timeout por request en segundos (default: 60)')
+    parser.add_argument('--output', '-o', type=str, default='benchmark_escalado',
+                       help='Directorio de resultados (default: benchmark_escalado)')
     parser.add_argument('--dashboard', '-d', action='store_true',
                        help='Iniciar dashboard web en puerto 5000')
     parser.add_argument('--verbose', '-v', action='store_true', default=True,
