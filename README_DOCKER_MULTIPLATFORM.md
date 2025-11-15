@@ -11,6 +11,10 @@ Esta guía te permitirá ejecutar los benchmarks de FastAPI con logging completo
 - **4GB RAM** mínimo recomendado
 - **2GB** de espacio libre en disco
 
+### Para Análisis de Logs (Opcional)
+- **Python 3.10+** instalado en el sistema host
+- **Dependencias Python** instaladas (ver sección de instalación)
+
 ## 🖥️ Instalación por Sistema Operativo
 
 ### 🟦 Debian 12 (Bookworm)
@@ -186,6 +190,8 @@ docker build -t fastapi-benchmark:latest .
 docker run -it --rm \
   -v $(pwd)/.logs:/app/.logs \
   -v $(pwd)/benchmark_results:/app/benchmark_results \
+  -v $(pwd)/resultados_nuevos:/app/resultados_nuevos \
+  -v $(pwd)/resultados_vps:/app/resultados_vps \
   --name fastapi-benchmark \
   fastapi-benchmark:latest
 
@@ -196,6 +202,10 @@ docker run -it --rm \
   fastapi-benchmark:latest \
   python benchmark_python.py --tests 5 --connections 50
 ```
+
+# Correr contenedor
+docker run -d --name bench -p 8000:8000 fastapi-benchmark:latest
+
 
 ## 📊 Ejecución Diaria Recomendada (4 Semanas)
 
@@ -276,6 +286,49 @@ Después de ejecutar los benchmarks, tendrás esta estructura:
 └── README.md             # Documentación del sistema
 ```
 
+## 🐍 Instalación de Python para Análisis (Opcional)
+
+Si prefieres ejecutar el análisis de logs directamente en tu sistema sin Docker:
+
+### Debian/Ubuntu/Kubuntu
+```bash
+# Instalar Python y herramientas
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv
+
+# Crear entorno virtual
+python3 -m venv benchmark-env
+source benchmark-env/bin/activate
+
+# Instalar dependencias
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Verificar instalación
+python --version
+python -c "import pandas, matplotlib, seaborn; print('✅ Dependencias instaladas')"
+```
+
+### Arch Linux
+```bash
+# Instalar Python
+sudo pacman -S python python-pip python-virtualenv
+
+# Crear entorno virtual
+python -m venv benchmark-env
+source benchmark-env/bin/activate
+
+# Instalar dependencias
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### Desactivar Entorno Virtual
+```bash
+# Cuando termines el análisis
+deactivate
+```
+
 ## 🔧 Comandos Útiles
 
 ### Monitoreo de Recursos
@@ -296,18 +349,62 @@ docker system prune -a
 
 ### Análisis de Logs
 
+#### 🤖 Opción 1: Automático (Nuevo)
 ```bash
-# Analizar logs de los últimos 7 días
-python analyze_logs.py --days 7
+# Hacer ejecutable el script
+chmod +x auto_analysis.sh
+
+# Análisis automático con Docker (recomendado)
+./auto_analysis.sh --docker
+
+# Análisis automático con Python local
+./auto_analysis.sh --python
+
+# Programar ejecución diaria automática
+./auto_analysis.sh --schedule  # Ver opciones de cron/systemd
+```
+
+#### 🐳 Opción 2: Manual con Docker
+```bash
+# Ejecutar análisis usando el contenedor
+docker compose --profile tools run log-analyzer
+
+# Análisis específico con parámetros
+docker compose run --rm benchmark python analyze_logs.py --days 7 --format all
 
 # Generar reporte en JSON
-python analyze_logs.py --days 14 --format json --output reporte.json
+docker compose run --rm benchmark python analyze_logs.py --days 14 --format json --output reporte.json
+```
 
-# Limpiar logs antiguos (simulación)
+#### 🐍 Opción 3: Manual con Python Local (Requiere instalación)
+```bash
+# PRIMERO: Instalar Python y dependencias
+# Ubuntu/Debian/Kubuntu:
+sudo apt install python3 python3-pip python3-venv
+
+# Arch Linux:
+sudo pacman -S python python-pip
+
+# Crear entorno virtual e instalar dependencias
+python3 -m venv benchmark-env
+source benchmark-env/bin/activate  # En Linux/Mac
+# O en Windows: benchmark-env\Scripts\activate
+
+pip install -r requirements.txt
+
+# LUEGO: Ejecutar análisis
+python analyze_logs.py --days 7 --format all
+python analyze_logs.py --days 14 --format json --output reporte.json
 python analyze_logs.py --clean --dry-run --days 10
 
 # Ver logs de rendimiento en tiempo real
 tail -f .logs/performance/$(date +%Y-%m-%d)_performance.log
+```
+
+#### 📋 Ver Comandos Manuales Detallados
+```bash
+# Ver todos los comandos manuales disponibles
+./auto_analysis.sh --manual
 ```
 
 ## 🐛 Solución de Problemas

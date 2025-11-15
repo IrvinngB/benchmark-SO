@@ -155,19 +155,47 @@ _________________________________________________________
 ## 🔧 Comandos de Análisis
 
 ### Análisis de Logs
+
+#### Con Docker (Recomendado - No requiere instalación Python)
 ```bash
 # Análisis semanal
-python analyze_logs.py --days 7 --format all
+docker compose run --rm benchmark python analyze_logs.py --days 7 --format all
 
-# Análisis completo del mes
-python analyze_logs.py --days 30 --format json --output monthly_report.json
+# Análisis completo del mes  
+docker compose run --rm benchmark python analyze_logs.py --days 30 --format json --output monthly_report.json
 
 # Generar gráficos
+docker compose run --rm benchmark python analyze_logs.py --days 14 --format markdown --output weekly_report.md
+```
+
+#### Con Python Local (Requiere instalación previa)
+```bash
+# PRIMERO: Activar entorno virtual (si usas uno)
+source benchmark-env/bin/activate  # Linux/Mac
+# venv\Scripts\activate              # Windows
+
+# LUEGO: Ejecutar análisis
+python analyze_logs.py --days 7 --format all
+python analyze_logs.py --days 30 --format json --output monthly_report.json
 python analyze_logs.py --days 14 --format markdown --output weekly_report.md
 ```
 
 ### Limpieza de Logs
+
+#### Con Docker
 ```bash
+# Ver qué se eliminaría (simulación)
+docker compose run --rm benchmark python analyze_logs.py --clean --dry-run --days 7
+
+# Limpiar logs antiguos
+docker compose run --rm benchmark python analyze_logs.py --clean --days 30
+```
+
+#### Con Python Local
+```bash
+# Activar entorno virtual primero
+source benchmark-env/bin/activate  # Linux/Mac
+
 # Ver qué se eliminaría (simulación)
 python analyze_logs.py --clean --dry-run --days 7
 
