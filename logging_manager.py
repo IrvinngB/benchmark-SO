@@ -153,9 +153,11 @@ class BenchmarkLogManager:
         
         for dir_path in directories:
             try:
-                dir_path.mkdir(parents=True, exist_ok=True)
-                created_dirs.append(str(dir_path))
-                print(f"✅ Directorio creado/verificado: {dir_path}")
+                if not dir_path.exists():
+                    dir_path.mkdir(parents=True, exist_ok=True)
+                    created_dirs.append(str(dir_path))
+                    print(f"✅ Directorio creado: {dir_path}")
+                # No imprimir si ya existe
             except PermissionError as e:
                 failed_dirs.append(str(dir_path))
                 warnings.warn(f"⚠️ No se pudo crear {dir_path} por permisos: {e}")
@@ -164,7 +166,9 @@ class BenchmarkLogManager:
                 warnings.warn(f"⚠️ Error creando {dir_path}: {e}")
         
         if created_dirs:
-            print(f"📁 {len(created_dirs)} directorios listos")
+            print(f"📁 {len(created_dirs)} directorios nuevos creados")
+        elif not failed_dirs:
+            print(f"📁 Estructura de directorios verificada")
         if failed_dirs:
             print(f"⚠️ {len(failed_dirs)} directorios fallaron")
     
@@ -557,22 +561,30 @@ def ensure_log_directories(log_root: Optional[str] = None) -> Path:
         log_root / "connectivity"
     ]
     
+    created_count = 0
     for dir_path in directories:
         try:
-            dir_path.mkdir(parents=True, exist_ok=True)
-            print(f"📁 Directorio creado/verificado: {dir_path}")
+            if not dir_path.exists():
+                dir_path.mkdir(parents=True, exist_ok=True)
+                created_count += 1
+                print(f"📁 Directorio creado: {dir_path}")
+            # No imprimir si ya existe para evitar spam
         except PermissionError:
             print(f"⚠️ Sin permisos para crear: {dir_path}")
         except Exception as e:
             print(f"⚠️ Error creando {dir_path}: {e}")
     
-    # Crear README inmediatamente
+    # Crear README solo si no existe
     readme_path = log_root / "README.md"
     if not readme_path.exists():
         _create_readme_immediate(log_root)
         print(f"📝 README creado: {readme_path}")
     
-    print(f"✅ Estructura de logging lista en: {log_root}")
+    if created_count > 0:
+        print(f"✅ {created_count} directorios nuevos creados en: {log_root}")
+    else:
+        print(f"✅ Estructura de logging verificada en: {log_root}")
+    
     return log_root
 
 def get_log_manager(log_root: Optional[str] = None) -> BenchmarkLogManager:
@@ -705,11 +717,22 @@ def cleanup_old_logs(days_to_keep: int = 7, compress_after: int = 3) -> None:
 # INICIALIZACIÓN AUTOMÁTICA
 # ============================================================================
 
-# Crear directorios inmediatamente al importar este módulo
-print("🚀 Inicializando sistema de logging...")
-_default_log_root = ensure_log_directories()
-print("✅ Sistema de logging listo para usar")
-print()
+# Variable global para evitar inicialización múltiple
+_initialized = False
+
+def initialize_logging_system():
+    """Inicializar sistema de logging una sola vez"""
+    global _initialized
+    if not _initialized:
+        print("🚀 Inicializando sistema de logging...")
+        _default_log_root = ensure_log_directories()
+        print("✅ Sistema de logging listo para usar")
+        print()
+        _initialized = True
+    return _initialized
+
+# Inicializar automáticamente solo al importar por primera vez
+initialize_logging_system()
 
 if __name__ == "__main__":
     # Test del sistema de logging
