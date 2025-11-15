@@ -111,9 +111,9 @@ class BenchmarkLogManager:
         if hasattr(self, '_initialized') and self._initialized:
             return
         
-        # Configurar ruta raíz de logs con ruta absoluta
+        # Configurar ruta raíz de logs con ruta absoluta (al mismo nivel del proyecto)
         if log_root is None:
-            self.log_root = Path(__file__).parent.resolve() / "logs"
+            self.log_root = Path(__file__).parent.parent.resolve() / "logs"
         else:
             self.log_root = Path(log_root).resolve()
         
@@ -548,7 +548,7 @@ python export_logs.py --format csv --output reports/
 def ensure_log_directories(log_root: Optional[str] = None) -> Path:
     """Asegurar que los directorios de log existan INMEDIATAMENTE"""
     if log_root is None:
-        log_root = Path(__file__).parent.resolve() / "logs"
+        log_root = Path(__file__).parent.parent.resolve() / "logs"
     else:
         log_root = Path(log_root).resolve()
     
@@ -680,7 +680,7 @@ grep "CPU:" logs/system/system_$(date +%Y-%m-%d).log | grep -E "9[0-9]|100"
 
 def cleanup_old_logs(days_to_keep: int = 7, compress_after: int = 3) -> None:
     """Limpiar y comprimir logs antiguos"""
-    log_root = Path(__file__).parent.resolve() / "logs"
+    log_root = Path(__file__).parent.parent.resolve() / "logs"
     
     if not log_root.exists():
         return
