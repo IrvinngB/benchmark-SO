@@ -1,7 +1,108 @@
-# FastAPI Performance Testing - Dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+# FastAPI Performance Benchmark - Python Edition
+# Dependencias para benchmarking avanzado con monitoreo en tiempo real
 
-python-dotenv==1.0.0
-pydantic==2.4.2
-pydantic-settings==2.0.3
+# ============================================================================
+# CORE DEPENDENCIES - Benchmarking y HTTP
+# ============================================================================
+aiohttp>=3.8.0,<4.0.0          # Cliente HTTP asíncrono de alto rendimiento
+asyncio-throttle>=1.0.2        # Control de rate limiting
+httpx>=0.24.0                   # Cliente HTTP alternativo con soporte async
+requests>=2.31.0                # Cliente HTTP síncrono (fallback)
+
+# ============================================================================
+# SYSTEM MONITORING - Monitoreo de recursos
+# ============================================================================
+psutil>=5.9.0                   # Monitoreo de CPU, RAM, Network, Disk I/O
+py-cpuinfo>=9.0.0              # Información detallada del CPU
+GPUtil>=1.4.0                   # Monitoreo de GPU (opcional)
+
+# ============================================================================
+# DATA ANALYSIS - Análisis y procesamiento de datos
+# ============================================================================
+pandas>=2.0.0                   # Análisis de datos y DataFrames
+numpy>=1.24.0                   # Computación numérica
+scipy>=1.10.0                   # Estadística avanzada
+statsmodels>=0.14.0            # Modelos estadísticos y análisis
+
+# ============================================================================
+# VISUALIZATION - Gráficos y visualización
+# ============================================================================
+matplotlib>=3.7.0               # Gráficos base
+seaborn>=0.12.0                 # Visualización estadística avanzada
+plotly>=5.14.0                  # Gráficos interactivos
+bokeh>=3.1.0                    # Visualización web interactiva
+
+# ============================================================================
+# USER INTERFACE - Interfaz de línea de comandos
+# ============================================================================
+rich>=13.0.0                    # Terminal con colores, tablas, progress bars
+tqdm>=4.65.0                    # Progress bars
+click>=8.1.0                    # CLI framework alternativo
+colorama>=0.4.6                 # Colores en terminal (Windows)
+
+# ============================================================================
+# DATA EXPORT - Exportación de datos
+# ============================================================================
+openpyxl>=3.1.0                 # Excel files (.xlsx)
+xlsxwriter>=3.1.0               # Excel con formato avanzado
+tabulate>=0.9.0                 # Tablas en texto
+markdown>=3.4.0                 # Generación de Markdown
+
+# ============================================================================
+# WEB DASHBOARD (Opcional) - Dashboard web en tiempo real
+# ============================================================================
+flask>=2.3.0                    # Web framework para dashboard
+flask-socketio>=5.3.0          # WebSockets para actualizaciones en tiempo real
+eventlet>=0.33.0                # Servidor async para Flask
+
+# ============================================================================
+# DEVELOPMENT & TESTING - Herramientas de desarrollo
+# ============================================================================
+pytest>=7.3.0                   # Testing framework
+pytest-asyncio>=0.21.0         # Testing para código async
+black>=23.0.0                   # Code formatter
+flake8>=6.0.0                   # Linting
+mypy>=1.3.0                     # Type checking
+
+# ============================================================================
+# PERFORMANCE OPTIMIZATION - Optimizaciones adicionales
+# ============================================================================
+uvloop>=0.17.0; sys_platform != "win32"  # Event loop optimizado (Unix only)
+cchardet>=2.1.7                 # Detección de encoding optimizada
+orjson>=3.8.0                   # JSON serialización ultra-rápida
+msgpack>=1.0.0                  # Serialización binaria eficiente
+
+# ============================================================================
+# MEMORY PROFILING - Profiling de memoria (opcional)
+# ============================================================================
+memory-profiler>=0.60.0        # Profiling de memoria línea por línea
+pympler>=0.9                    # Análisis detallado de memoria
+# tracemalloc-pretty>=0.1.0    # No disponible en todos los sistemas
+
+# ============================================================================
+# NETWORK & SECURITY - Red y seguridad
+# ============================================================================
+cryptography>=41.0.0           # Criptografía (para HTTPS si es necesario)
+certifi>=2023.5.0              # Certificados SSL actualizados
+urllib3>=2.0.0                  # HTTP client de bajo nivel
+
+# ============================================================================
+# LOGGING & MONITORING - Logging estructurado
+# ============================================================================
+structlog>=23.1.0               # Logging estructurado
+loguru>=0.7.0                   # Logging avanzado y fácil de usar
+python-json-logger>=2.0.0      # JSON logging
+
+# ============================================================================
+# CONFIGURATION - Configuración
+# ============================================================================
+pydantic>=2.0.0                 # Validación de configuración
+python-dotenv>=1.0.0           # Variables de entorno desde .env
+toml>=0.10.0                    # Configuración en TOML
+PyYAML>=6.0                     # Configuración en YAML
+
+# ============================================================================
+# EXTRAS - Utilidades adicionales
+# ============================================================================
+humanize>=4.6.0                 # Formateo human-readable de números
+python-dateutil>=2.8.0          # Parsing de fechas avanzado

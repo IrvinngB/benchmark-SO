@@ -59,7 +59,7 @@ class BenchmarkConfig:
     default_requests: int = 500
     default_connections: int = 100
     timeout: int = 60
-    results_dir: str = "benchmark_escalado"
+    results_dir: str = "resultados_nuevos"
     
     servers: Dict[str, str] = None
     endpoints: List[Dict] = None
@@ -68,9 +68,7 @@ class BenchmarkConfig:
     def __post_init__(self):
         if self.servers is None:
             self.servers = {
-                "local": "localhost:8000",
-                "vps_no_docker": "138.68.233.15:8000",
-                "vps_docker": "68.183.168.86:8000"
+                "local_docker": "localhost:8000"
             }
         
         if self.endpoints is None:
@@ -84,8 +82,7 @@ class BenchmarkConfig:
         
         if self.environments is None:
             self.environments = [
-                {"name": "vps_no_docker", "label": "VPS Sin Docker", "ip": "138.68.233.15"},
-                {"name": "vps_docker", "label": "VPS Con Docker", "ip": "68.183.168.86"}
+                {"name": "local_docker", "label": "Docker Local", "ip": "localhost"}
             ]
 
 @dataclass
@@ -443,46 +440,81 @@ class BenchmarkAnalyzer:
         viz_dir = self.results_dir / f"visualizations_{timestamp}"
         viz_dir.mkdir(exist_ok=True)
         
-        # 1. Comparación de RPS por endpoint y entorno
+        # 1. Distribución de RPS por endpoint (Docker Local)
         plt.figure(figsize=(15, 8))
-        sns.boxplot(data=df, x='endpoint_name', y='requests_per_second', hue='environment')
-        plt.title('Requests per Second por Endpoint y Entorno')
+        sns.boxplot(data=df, x='endpoint_name', y='requests_per_second')
+        plt.title('Distribución de Requests per Second por Endpoint (Docker Local)')
         plt.xticks(rotation=45, ha='right')
+        plt.ylabel('Requests per Second')
+        
+        # Agregar línea de promedio general
+        overall_mean = df['requests_per_second'].mean()
+        plt.axhline(y=overall_mean, color='red', linestyle='--', alpha=0.7, label=f'Promedio General: {overall_mean:.2f}')
+        plt.legend()
+        
         plt.tight_layout()
-        plt.savefig(viz_dir / 'rps_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(viz_dir / 'rps_distribution.png', dpi=300, bbox_inches='tight')
         plt.close()
         
-        # 2. Latencia por percentiles
+        # 2. Análisis completo de latencia por percentiles
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         
         latency_cols = ['avg_latency_ms', 'p50_latency_ms', 'p95_latency_ms', 'p99_latency_ms']
-        titles = ['Latencia Promedio', 'Latencia P50', 'Latencia P95', 'Latencia P99']
+        titles = ['Latencia Promedio', 'Latencia P50 (Mediana)', 'Latencia P95', 'Latencia P99']
         
         for i, (col, title) in enumerate(zip(latency_cols, titles)):
             ax = axes[i // 2, i % 2]
-            sns.boxplot(data=df, x='environment', y=col, ax=ax)
-            ax.set_title(title)
-            ax.set_ylabel('Latencia (ms)')
+            sns.histplot(data=df, x=col, kde=True, ax=ax, alpha=0.7)
+            ax.set_title(f'{title} - Docker Local')
+            ax.set_xlabel('Latencia (ms)')
+            ax.set_ylabel('Frecuencia')
+            
+            # Agregar línea de promedio
+            mean_val = df[col].mean()
+            ax.axvline(x=mean_val, color='red', linestyle='--', label=f'Promedio: {mean_val:.1f}ms')
+            ax.legend()
         
         plt.tight_layout()
-        plt.savefig(viz_dir / 'latency_analysis.png', dpi=300, bbox_inches='tight')
+        plt.savefig(viz_dir / 'latency_distribution.png', dpi=300, bbox_inches='tight')
         plt.close()
         
-        # 3. Uso de recursos
-        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        # 3. Análisis de uso de recursos del sistema
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         
         # CPU Usage
-        sns.boxplot(data=df, x='environment', y='cpu_usage_percent', ax=axes[0])
-        axes[0].set_title('Uso de CPU durante benchmarks')
-        axes[0].set_ylabel('CPU (%)')
+        sns.histplot(data=df, x='cpu_usage_percent', kde=True, ax=axes[0,0], alpha=0.7)
+        axes[0,0].set_title('Distribución de Uso de CPU')
+        axes[0,0].set_xlabel('CPU (%)')
+        cpu_mean = df['cpu_usage_percent'].mean()
+        axes[0,0].axvline(x=cpu_mean, color='red', linestyle='--', label=f'Promedio: {cpu_mean:.1f}%')
+        axes[0,0].legend()
         
         # Memory Usage
-        sns.boxplot(data=df, x='environment', y='memory_usage_mb', ax=axes[1])
-        axes[1].set_title('Uso de Memoria durante benchmarks')
-        axes[1].set_ylabel('Memoria (MB)')
+        sns.histplot(data=df, x='memory_usage_mb', kde=True, ax=axes[0,1], alpha=0.7)
+        axes[0,1].set_title('Distribución de Uso de Memoria')
+        axes[0,1].set_xlabel('Memoria (MB)')
+        mem_mean = df['memory_usage_mb'].mean()
+        axes[0,1].axvline(x=mem_mean, color='red', linestyle='--', label=f'Promedio: {mem_mean:.1f}MB')
+        axes[0,1].legend()
+        
+        # Throughput
+        sns.histplot(data=df, x='throughput_mbps', kde=True, ax=axes[1,0], alpha=0.7)
+        axes[1,0].set_title('Distribución de Throughput')
+        axes[1,0].set_xlabel('Throughput (Mbps)')
+        throughput_mean = df['throughput_mbps'].mean()
+        axes[1,0].axvline(x=throughput_mean, color='red', linestyle='--', label=f'Promedio: {throughput_mean:.1f}Mbps')
+        axes[1,0].legend()
+        
+        # Error Rate
+        sns.histplot(data=df, x='error_rate', kde=True, ax=axes[1,1], alpha=0.7)
+        axes[1,1].set_title('Distribución de Tasa de Error')
+        axes[1,1].set_xlabel('Error Rate (%)')
+        error_mean = df['error_rate'].mean()
+        axes[1,1].axvline(x=error_mean, color='red', linestyle='--', label=f'Promedio: {error_mean:.2f}%')
+        axes[1,1].legend()
         
         plt.tight_layout()
-        plt.savefig(viz_dir / 'resource_usage.png', dpi=300, bbox_inches='tight')
+        plt.savefig(viz_dir / 'resource_analysis.png', dpi=300, bbox_inches='tight')
         plt.close()
         
         # 4. Correlación entre métricas
@@ -498,18 +530,33 @@ class BenchmarkAnalyzer:
         plt.savefig(viz_dir / 'correlation_matrix.png', dpi=300, bbox_inches='tight')
         plt.close()
         
-        # 5. Timeline de performance
-        plt.figure(figsize=(15, 8))
-        for env in df['environment'].unique():
-            env_data = df[df['environment'] == env]
-            plt.plot(env_data['test_number'], env_data['requests_per_second'], 
-                    marker='o', label=env, alpha=0.7)
+        # 5. Timeline de performance y tendencias
+        fig, axes = plt.subplots(2, 1, figsize=(15, 12))
         
-        plt.title('Evolución del RPS a lo largo de las pruebas')
-        plt.xlabel('Número de Test')
-        plt.ylabel('Requests per Second')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
+        # Timeline de RPS por endpoint
+        for endpoint in df['endpoint_name'].unique():
+            endpoint_data = df[df['endpoint_name'] == endpoint]
+            axes[0].plot(endpoint_data['test_number'], endpoint_data['requests_per_second'], 
+                        marker='o', label=endpoint, alpha=0.8, linewidth=2)
+        
+        axes[0].set_title('Evolución del RPS por Endpoint a lo largo de las pruebas')
+        axes[0].set_xlabel('Número de Test')
+        axes[0].set_ylabel('Requests per Second')
+        axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        axes[0].grid(True, alpha=0.3)
+        
+        # Timeline de latencia promedio
+        for endpoint in df['endpoint_name'].unique():
+            endpoint_data = df[df['endpoint_name'] == endpoint]
+            axes[1].plot(endpoint_data['test_number'], endpoint_data['avg_latency_ms'], 
+                        marker='s', label=endpoint, alpha=0.8, linewidth=2)
+        
+        axes[1].set_title('Evolución de la Latencia Promedio por Endpoint')
+        axes[1].set_xlabel('Número de Test')
+        axes[1].set_ylabel('Latencia Promedio (ms)')
+        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        axes[1].grid(True, alpha=0.3)
+        
         plt.tight_layout()
         plt.savefig(viz_dir / 'performance_timeline.png', dpi=300, bbox_inches='tight')
         plt.close()
@@ -528,17 +575,22 @@ class BenchmarkAnalyzer:
         report_lines.append("## Resumen Ejecutivo")
         report_lines.append("")
         
-        for env in df['environment'].unique():
-            env_data = df[df['environment'] == env]
-            avg_rps = env_data['requests_per_second'].mean()
-            avg_latency = env_data['avg_latency_ms'].mean()
-            avg_cpu = env_data['cpu_usage_percent'].mean()
-            
-            report_lines.append(f"### {env.upper()}")
-            report_lines.append(f"- **RPS Promedio:** {avg_rps:.2f}")
-            report_lines.append(f"- **Latencia Promedio:** {avg_latency:.2f} ms")
-            report_lines.append(f"- **CPU Promedio:** {avg_cpu:.2f}%")
-            report_lines.append("")
+        # Análisis del entorno único (Docker Local)
+        env_data = df  # Solo hay un entorno
+        avg_rps = env_data['requests_per_second'].mean()
+        avg_latency = env_data['avg_latency_ms'].mean()
+        avg_cpu = env_data['cpu_usage_percent'].mean()
+        max_rps = env_data['requests_per_second'].max()
+        min_rps = env_data['requests_per_second'].min()
+        
+        report_lines.append(f"### DOCKER LOCAL - Análisis Completo")
+        report_lines.append(f"- **RPS Promedio:** {avg_rps:.2f}")
+        report_lines.append(f"- **RPS Máximo:** {max_rps:.2f}")
+        report_lines.append(f"- **RPS Mínimo:** {min_rps:.2f}")
+        report_lines.append(f"- **Latencia Promedio:** {avg_latency:.2f} ms")
+        report_lines.append(f"- **CPU Promedio:** {avg_cpu:.2f}%")
+        report_lines.append(f"- **Total de Pruebas:** {len(env_data)}")
+        report_lines.append("")
         
         # Análisis detallado por endpoint
         report_lines.append("## Análisis por Endpoint")
@@ -548,28 +600,50 @@ class BenchmarkAnalyzer:
             report_lines.append(f"### {endpoint}")
             endpoint_data = df[df['endpoint_name'] == endpoint]
             
-            comparison_table = endpoint_data.groupby('environment').agg({
-                'requests_per_second': ['mean', 'std'],
-                'avg_latency_ms': ['mean', 'std'],
-                'error_rate': 'mean'
-            }).round(2)
+            # Estadísticas por endpoint
+            stats = {
+                'RPS Promedio': endpoint_data['requests_per_second'].mean(),
+                'RPS Desv. Std': endpoint_data['requests_per_second'].std(),
+                'Latencia Promedio (ms)': endpoint_data['avg_latency_ms'].mean(),
+                'Latencia Desv. Std (ms)': endpoint_data['avg_latency_ms'].std(),
+                'P95 Latencia (ms)': endpoint_data['p95_latency_ms'].mean(),
+                'P99 Latencia (ms)': endpoint_data['p99_latency_ms'].mean(),
+                'Error Rate (%)': endpoint_data['error_rate'].mean(),
+                'CPU Promedio (%)': endpoint_data['cpu_usage_percent'].mean(),
+                'Throughput (Mbps)': endpoint_data['throughput_mbps'].mean()
+            }
             
-            report_lines.append(comparison_table.to_markdown())
+            for metric, value in stats.items():
+                report_lines.append(f"- **{metric}:** {value:.2f}")
             report_lines.append("")
         
-        # Estadísticas de estabilidad
-        report_lines.append("## Análisis de Estabilidad")
+        # Estadísticas de estabilidad y consistencia
+        report_lines.append("## Análisis de Estabilidad y Consistencia")
         report_lines.append("")
         
-        for env in df['environment'].unique():
-            env_data = df[df['environment'] == env]
-            rps_cv = (env_data['requests_per_second'].std() / env_data['requests_per_second'].mean()) * 100
-            latency_cv = (env_data['avg_latency_ms'].std() / env_data['avg_latency_ms'].mean()) * 100
+        # Análisis global de estabilidad
+        rps_cv = (df['requests_per_second'].std() / df['requests_per_second'].mean()) * 100
+        latency_cv = (df['avg_latency_ms'].std() / df['avg_latency_ms'].mean()) * 100
+        cpu_cv = (df['cpu_usage_percent'].std() / df['cpu_usage_percent'].mean()) * 100
+        
+        report_lines.append(f"### DOCKER LOCAL - Métricas de Consistencia")
+        report_lines.append(f"- **Coeficiente de Variación RPS:** {rps_cv:.2f}% {'(Excelente)' if rps_cv < 10 else '(Moderado)' if rps_cv < 20 else '(Alto)'}")
+        report_lines.append(f"- **Coeficiente de Variación Latencia:** {latency_cv:.2f}% {'(Excelente)' if latency_cv < 15 else '(Moderado)' if latency_cv < 30 else '(Alto)'}")
+        report_lines.append(f"- **Coeficiente de Variación CPU:** {cpu_cv:.2f}% {'(Estable)' if cpu_cv < 25 else '(Variable)' if cpu_cv < 50 else '(Muy Variable)'}")
+        
+        # Análisis de tendencias por número de test
+        test_numbers = sorted(df['test_number'].unique())
+        if len(test_numbers) > 1:
+            # Correlación entre número de test y rendimiento
+            rps_correlation = df['test_number'].corr(df['requests_per_second'])
+            latency_correlation = df['test_number'].corr(df['avg_latency_ms'])
             
-            report_lines.append(f"### {env.upper()}")
-            report_lines.append(f"- **Coeficiente de Variación RPS:** {rps_cv:.2f}%")
-            report_lines.append(f"- **Coeficiente de Variación Latencia:** {latency_cv:.2f}%")
             report_lines.append("")
+            report_lines.append("### Análisis de Tendencias")
+            report_lines.append(f"- **Correlación Test-RPS:** {rps_correlation:.3f} {'(Mejora con el tiempo)' if rps_correlation > 0.1 else '(Degrada con el tiempo)' if rps_correlation < -0.1 else '(Estable en el tiempo)'}")
+            report_lines.append(f"- **Correlación Test-Latencia:** {latency_correlation:.3f} {'(Empeora con el tiempo)' if latency_correlation > 0.1 else '(Mejora con el tiempo)' if latency_correlation < -0.1 else '(Estable en el tiempo)'}")
+        
+        report_lines.append("")
         
         report_content = "\n".join(report_lines)
         
@@ -595,8 +669,9 @@ class BenchmarkUI:
         """Muestra el header del benchmark"""
         self.console.print(Panel.fit(
             "[bold cyan]🚀 FastAPI Performance Benchmark - Python Edition[/bold cyan]\n\n"
-            f"📊 Ejecutando {config.num_tests} pruebas por entorno (ESCALADO)\n"
-            f"🎯 Total de pruebas: {config.num_tests * len(config.endpoints) * len(config.environments)} (modo ALTO VOLUMEN)\n"
+            f"📊 Ejecutando {config.num_tests} pruebas en Docker Local\n"
+            f"🎯 Total de pruebas: {config.num_tests * len(config.endpoints)} (modo ALTO VOLUMEN)\n"
+            f"🐳 Entorno: Docker en localhost:8000\n"
             f"⚡ Motor: AsyncIO + aiohttp\n"
             f"📈 Monitoreo: CPU, RAM, Network en tiempo real",
             title="Benchmark Configuration",
@@ -802,8 +877,8 @@ def main():
                        help='Requests por endpoint ligero (default: 500)')
     parser.add_argument('--timeout', type=int, default=60,
                        help='Timeout por request en segundos (default: 60)')
-    parser.add_argument('--output', '-o', type=str, default='benchmark_escalado',
-                       help='Directorio de resultados (default: benchmark_escalado)')
+    parser.add_argument('--output', '-o', type=str, default='resultados_nuevos',
+                       help='Directorio de resultados (default: resultados_nuevos)')
     parser.add_argument('--dashboard', '-d', action='store_true',
                        help='Iniciar dashboard web en puerto 5000')
     parser.add_argument('--verbose', '-v', action='store_true', default=True,
@@ -892,14 +967,26 @@ def main():
                 console.print(f"   - Reporte Markdown")
                 console.print(f"   - Gráficos profesionales en carpeta visualizations_*")
                 
-                # Mostrar resumen rápido
-                console.print("\n[bold cyan]📈 Resumen Rápido:[/bold cyan]")
-                for env in config.environments:
-                    env_results = [r for r in results if r.environment == env['name']]
-                    if env_results:
-                        avg_rps = statistics.mean([r.requests_per_second for r in env_results])
-                        avg_latency = statistics.mean([r.avg_latency_ms for r in env_results])
-                        console.print(f"  {env['label']}: {avg_rps:.2f} RPS, {avg_latency:.2f}ms latency")
+                # Mostrar resumen rápido del entorno Docker local
+                console.print("\n[bold cyan]📈 Resumen Docker Local:[/bold cyan]")
+                if results:
+                    avg_rps = statistics.mean([r.requests_per_second for r in results])
+                    avg_latency = statistics.mean([r.avg_latency_ms for r in results])
+                    max_rps = max([r.requests_per_second for r in results])
+                    min_rps = min([r.requests_per_second for r in results])
+                    avg_cpu = statistics.mean([r.cpu_usage_percent for r in results])
+                    avg_error_rate = statistics.mean([r.error_rate for r in results])
+                    
+                    console.print(f"  📊 RPS - Promedio: {avg_rps:.2f} | Máximo: {max_rps:.2f} | Mínimo: {min_rps:.2f}")
+                    console.print(f"  ⏱️  Latencia Promedio: {avg_latency:.2f}ms")
+                    console.print(f"  🖥️  CPU Promedio: {avg_cpu:.1f}%")
+                    console.print(f"  ❌ Tasa de Error: {avg_error_rate:.2f}%")
+                    
+                    # Mejores y peores endpoints
+                    best_endpoint = max(results, key=lambda x: x.requests_per_second)
+                    worst_endpoint = min(results, key=lambda x: x.requests_per_second)
+                    console.print(f"  🥇 Mejor Endpoint: {best_endpoint.endpoint_name} ({best_endpoint.requests_per_second:.2f} RPS)")
+                    console.print(f"  🔴 Endpoint con más carga: {worst_endpoint.endpoint_name} ({worst_endpoint.requests_per_second:.2f} RPS)")
                 
             else:
                 console.print("[red]❌ No se pudieron completar las pruebas[/red]")
