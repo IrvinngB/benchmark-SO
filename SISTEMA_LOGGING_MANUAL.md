@@ -28,9 +28,13 @@
 ./daily_benchmark.sh
 
 # Los logs se generan automáticamente en:
-# .logs/daily/2025-11-14.log
-# .logs/performance/2025-11-14_performance.log
-# .logs/errors/2025-11-14_errors.log (si hay errores)
+# .logs/daily/2025-11-15.log                    # ✅ Log principal del día
+# .logs/daily/execution_2025-11-15_14-30-25.log # ✅ Log con hora exacta
+# .logs/performance/2025-11-15_performance.log   # ✅ Métricas de rendimiento
+# .logs/errors/2025-11-15_errors.log            # ✅ Solo si hay errores
+
+# 📁 IMPORTANTE: Las carpetas .logs/ y subcarpetas se crean AUTOMÁTICAMENTE
+# 🕐 Los nombres incluyen fecha (YYYY-MM-DD) y hora (HH-MM-SS) automáticamente
 ```
 
 ### 2️⃣ **Benchmark + Análisis Manual**
@@ -104,15 +108,24 @@ crontab -e
 
 ### **Archivos Generados:**
 ```
-analysis_results/
-├── auto_analysis_2025-11-14_10-30-15.json    # Datos procesables
-├── auto_report_2025-11-14_10-30-15.md        # Reporte legible
-├── auto_data_2025-11-14_10-30-15.csv         # Para Excel
+analysis_results/                              # 📁 Se crea automáticamente
+├── auto_analysis_2025-11-15_10-30-15.json    # Datos procesables
+├── auto_report_2025-11-15_10-30-15.md        # Reporte legible  
+├── auto_data_2025-11-15_10-30-15.csv         # Para Excel
 └── ...
 
-.logs/daily/
-├── auto_analysis_2025-11-14_10-30-15.log     # Log del proceso
-└── ...
+.logs/                                         # 📁 Se crea automáticamente
+├── daily/                                     # 📁 Se crea automáticamente
+│   ├── 2025-11-15.log                        # Log principal del día
+│   ├── execution_2025-11-15_14-30-25.log     # Ejecución específica con hora
+│   └── auto_analysis_2025-11-15_10-30-15.log # Log del análisis automático
+├── performance/                               # 📁 Se crea automáticamente
+│   ├── 2025-11-15_performance.log            # Métricas del día
+│   └── 2025-11-15_connectivity.log           # Tests de conectividad
+├── errors/                                    # 📁 Se crea automáticamente (si hay errores)
+│   └── 2025-11-15_errors.log                 # Solo errores del día
+└── archive/                                   # 📁 Se crea automáticamente
+    └── *.log.gz                               # Logs > 7 días comprimidos
 ```
 
 ---

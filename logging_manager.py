@@ -536,10 +536,90 @@ python export_logs.py --format csv --output reports/
 # UTILITIES
 # ============================================================================
 
+def ensure_log_directories(log_root: Optional[str] = None) -> Path:
+    """Asegurar que los directorios de log existan INMEDIATAMENTE"""
+    if log_root is None:
+        log_root = Path(__file__).parent / ".logs"
+    else:
+        log_root = Path(log_root)
+    
+    # Crear directorios inmediatamente
+    directories = [
+        log_root / "daily",
+        log_root / "errors", 
+        log_root / "performance",
+        log_root / "archive"
+    ]
+    
+    for dir_path in directories:
+        dir_path.mkdir(parents=True, exist_ok=True)
+        print(f"📁 Directorio creado/verificado: {dir_path}")
+    
+    # Crear README inmediatamente
+    readme_path = log_root / "README.md"
+    if not readme_path.exists():
+        _create_readme_immediate(log_root)
+        print(f"📝 README creado: {readme_path}")
+    
+    print(f"✅ Estructura de logging lista en: {log_root}")
+    return log_root
+
 def get_log_manager(log_root: Optional[str] = None) -> BenchmarkLogManager:
     """Factory function para obtener instancia singleton de LogManager"""
+    # Asegurar directorios ANTES de crear el LogManager
+    ensure_log_directories(log_root)
     return BenchmarkLogManager(log_root)
 
+
+def _create_readme_immediate(log_root: Path) -> None:
+    """Crear archivo README inmediatamente en el directorio de logs"""
+    readme_path = log_root / "README.md"
+    
+    readme_content = """# Sistema de Logging - FastAPI Performance Benchmark
+
+## Estructura de Directorios
+
+```
+.logs/
+├── daily/           # Logs generales por día
+├── errors/          # Logs de errores y advertencias  
+├── performance/     # Logs de métricas de rendimiento
+├── archive/         # Logs comprimidos (>7 días)
+└── README.md        # Este archivo
+```
+
+## Uso
+
+### Logs Diarios
+- **Patrón:** `YYYY-MM-DD.log`
+- **Contenido:** Logs generales, inicio/fin de tests
+
+### Logs de Errores
+- **Patrón:** `YYYY-MM-DD_errors.log` 
+- **Contenido:** Errores y advertencias
+
+### Logs de Rendimiento
+- **Patrón:** `YYYY-MM-DD_performance.log`
+- **Contenido:** Métricas (RPS, latencia, CPU, memoria)
+
+### Ver logs en tiempo real
+```bash
+# Logs de hoy
+tail -f .logs/daily/$(date +%Y-%m-%d).log
+
+# Errores de hoy  
+tail -f .logs/errors/$(date +%Y-%m-%d)_errors.log
+
+# Rendimiento de hoy
+tail -f .logs/performance/$(date +%Y-%m-%d)_performance.log
+```
+
+---
+**Creado automáticamente:** """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """
+"""
+    
+    with open(readme_path, 'w', encoding='utf-8') as f:
+        f.write(readme_content)
 
 def cleanup_old_logs(days_to_keep: int = 7, compress_after: int = 3) -> None:
     """Limpiar y comprimir logs antiguos"""
@@ -583,11 +663,21 @@ def cleanup_old_logs(days_to_keep: int = 7, compress_after: int = 3) -> None:
                     print(f"Error eliminando {log_file}: {e}")
 
 
+# ============================================================================
+# INICIALIZACIÓN AUTOMÁTICA
+# ============================================================================
+
+# Crear directorios inmediatamente al importar este módulo
+print("🚀 Inicializando sistema de logging...")
+_default_log_root = ensure_log_directories()
+print("✅ Sistema de logging listo para usar")
+print()
+
 if __name__ == "__main__":
     # Test del sistema de logging
     print("🧪 Probando LogManager...")
     
-    # Obtener instancia
+    # Obtener instancia (directorios ya creados)
     log_manager = get_log_manager()
     
     # Probar diferentes tipos de logs
