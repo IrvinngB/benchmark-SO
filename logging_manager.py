@@ -12,7 +12,7 @@ Sistema avanzado de logging con:
 - Logging resiliente ante crashes
 
 Estructura de Carpetas:
-.logs/
+logs/
 ├── errors/             # Logs de errores (error_YYYY-MM-DD.log)
 ├── requests/           # Logs de requests HTTP (requests_YYYY-MM-DD.log)
 ├── system/             # Monitoreo sistema (system_YYYY-MM-DD.log)
@@ -51,7 +51,7 @@ class SafeDailyRotatingFileHandler(logging.FileHandler):
         except PermissionError:
             warnings.warn(f"No se pudo crear directorio {self.log_dir} por permisos")
             # Fallback a directorio actual
-            self.log_dir = Path.cwd().resolve() / ".logs_fallback" / log_type
+            self.log_dir = Path.cwd().resolve() / "logs_fallback" / log_type
             self.log_dir.mkdir(parents=True, exist_ok=True)
         
         filename = self._get_filename()
@@ -113,7 +113,7 @@ class BenchmarkLogManager:
         
         # Configurar ruta raíz de logs con ruta absoluta
         if log_root is None:
-            self.log_root = Path(__file__).parent.resolve() / ".logs"
+            self.log_root = Path(__file__).parent.resolve() / "logs"
         else:
             self.log_root = Path(log_root).resolve()
         
@@ -548,7 +548,7 @@ python export_logs.py --format csv --output reports/
 def ensure_log_directories(log_root: Optional[str] = None) -> Path:
     """Asegurar que los directorios de log existan INMEDIATAMENTE"""
     if log_root is None:
-        log_root = Path(__file__).parent.resolve() / ".logs"
+        log_root = Path(__file__).parent.resolve() / "logs"
     else:
         log_root = Path(log_root).resolve()
     
@@ -603,7 +603,7 @@ def _create_readme_immediate(log_root: Path) -> None:
 ## Estructura de Directorios
 
 ```
-.logs/
+logs/
 ├── errors/          # Logs de errores y advertencias
 ├── requests/        # Logs de requests HTTP y respuestas  
 ├── system/          # Logs de monitoreo sistema (CPU, RAM, etc.)
@@ -643,32 +643,32 @@ def _create_readme_immediate(log_root: Path) -> None:
 
 ```bash
 # Logs de benchmark hoy
-tail -f .logs/benchmark/benchmark_$(date +%Y-%m-%d).log
+tail -f logs/benchmark/benchmark_$(date +%Y-%m-%d).log
 
 # Errores de hoy  
-tail -f .logs/errors/error_$(date +%Y-%m-%d).log
+tail -f logs/errors/error_$(date +%Y-%m-%d).log
 
 # Requests de hoy
-tail -f .logs/requests/requests_$(date +%Y-%m-%d).log
+tail -f logs/requests/requests_$(date +%Y-%m-%d).log
 
 # Sistema de hoy
-tail -f .logs/system/system_$(date +%Y-%m-%d).log
+tail -f logs/system/system_$(date +%Y-%m-%d).log
 
 # Conectividad de hoy
-tail -f .logs/connectivity/connectivity_$(date +%Y-%m-%d).log
+tail -f logs/connectivity/connectivity_$(date +%Y-%m-%d).log
 ```
 
 ## Buscar eventos específicos
 
 ```bash
 # Buscar errores
-grep -i error .logs/errors/error_$(date +%Y-%m-%d).log
+grep -i error logs/errors/error_$(date +%Y-%m-%d).log
 
 # Buscar resultados de endpoint específico
-grep "Heavy Computation" .logs/requests/requests_$(date +%Y-%m-%d).log
+grep "Heavy Computation" logs/requests/requests_$(date +%Y-%m-%d).log
 
 # Buscar picos de CPU
-grep "CPU:" .logs/system/system_$(date +%Y-%m-%d).log | grep -E "9[0-9]|100"
+grep "CPU:" logs/system/system_$(date +%Y-%m-%d).log | grep -E "9[0-9]|100"
 ```
 
 ---
@@ -680,7 +680,7 @@ grep "CPU:" .logs/system/system_$(date +%Y-%m-%d).log | grep -E "9[0-9]|100"
 
 def cleanup_old_logs(days_to_keep: int = 7, compress_after: int = 3) -> None:
     """Limpiar y comprimir logs antiguos"""
-    log_root = Path(__file__).parent.resolve() / ".logs"
+    log_root = Path(__file__).parent.resolve() / "logs"
     
     if not log_root.exists():
         return
@@ -788,4 +788,4 @@ if __name__ == "__main__":
             for file in files:
                 print(f"    - {file}")
     
-    print("\n✅ Prueba completada - Revisar directories .logs/ para ver los resultados")
+    print("\n✅ Prueba completada - Revisar directorio logs/ para ver los resultados")

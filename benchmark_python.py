@@ -907,8 +907,8 @@ def main():
                        help='Output detallado')
     parser.add_argument('--analyze-only', '-a', type=str,
                        help='Solo analizar resultados existentes (ruta al directorio)')
-    parser.add_argument('--log-dir', type=str, default='.logs',
-                       help='Directorio para logs (default: .logs)')
+    parser.add_argument('--log-dir', type=str, default='logs',
+                       help='Directorio para logs (default: logs)')
     
     args = parser.parse_args()
     
@@ -979,9 +979,10 @@ def main():
                 report = analyzer.generate_report(df, timestamp)
                 
                 console.print(f"\n[bold green]✅ Benchmark completado exitosamente[/bold green]")
-                console.print(f"📁 Resultados guardados en: resultados_muestra/")
+                console.print(f"📁 Resultados guardados en: {config.results_dir}/")
                 log_manager.log_info("Benchmark completado exitosamente", category="general")
                 log_manager.log_info(f"Resultados guardados en: {config.results_dir}/", category="general")
+                console.print(f"📋 Logs guardados en: logs/")
                 console.print(f"📊 Archivos generados:")
                 console.print(f"   - CSV detallado con todas las métricas")
                 console.print(f"   - JSON estructurado para análisis")
