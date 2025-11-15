@@ -1,3 +1,16 @@
+# Logs generados por el sistema de logging
+.logs/
+*.log
+*.log.*
+*.gz
+
+# Configuraciones diarias generadas
+daily_config_*.json
+failure_report_*.json
+
+# Resultados de benchmarks diarios
+resultados_diarios/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

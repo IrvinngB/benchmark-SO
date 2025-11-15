@@ -1,37 +1,134 @@
 version: '3.8'
 
 services:
-  fastapi-app:
+  # Servicio principal de benchmarking
+  benchmark:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: fastapi-performance-test
-    ports:
-      - "8000:8000"
+      args:
+        - PYTHON_VERSION=3.11
+    container_name: fastapi-benchmark
+    restart: "no"  # No reiniciar automáticamente, solo ejecución manual
+    
+    # Variables de entorno
     environment:
-      - APP_NAME=FastAPI Performance Testing
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
       - LOG_LEVEL=INFO
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    # Recursos limitados para testing (ajustar según necesidad)
+      - BENCHMARK_ENV=docker
+      - TZ=America/Mexico_City
+    
+    # Volúmenes para persistir logs y resultados
+    volumes:
+      - ./.logs:/app/.logs:rw
+      - ./benchmark_results:/app/benchmark_results:rw
+      - ./benchmark_results_improved:/app/benchmark_results_improved:rw
+      - ./resultados_nuevos:/app/resultados_nuevos:rw
+      - ./resultados_vps:/app/resultados_vps:rw
+    
+    # Configuración de red
+    networks:
+      - benchmark-network
+    
+    # Configuración de recursos
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 1G
+          cpus: '2.0'      # Máximo 2 CPUs
+          memory: 2G       # Máximo 2GB RAM
         reservations:
-          cpus: '1'
-          memory: 512M
+          cpus: '0.5'      # Mínimo 0.5 CPU
+          memory: 512M     # Mínimo 512MB RAM
+    
+    # Healthcheck para monitoreo
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Configuración de logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Comando por defecto
+    command: ["python", "benchmark_python.py"]
+    
+    # Configuración adicional
+    stdin_open: true
+    tty: true
 
-# Para extensiones futuras (descomentar si se necesita)
-# networks:
-#   fastapi-network:
-#     driver: bridge
+  # Servicio opcional para FastAPI de prueba local (descomentada si necesitas)
+  # fastapi-app:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     target: app-stage
+  #   container_name: fastapi-test-app
+  #   restart: unless-stopped
+  #   
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - LOG_LEVEL=INFO
+  #   
+  #   ports:
+  #     - "8000:8000"
+  #   
+  #   networks:
+  #     - benchmark-network
+  #   
+  #   volumes:
+  #     - ./.logs:/app/.logs:rw
+  #   
+  #   command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+  #   
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
-# volumes:
-#   app-data:
+  # Servicio para análisis de logs (ejecutar manualmente)
+  log-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi-log-analyzer
+    restart: "no"
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    
+    volumes:
+      - ./.logs:/app/.logs:rw
+      - ./benchmark_results:/app/benchmark_results:rw
+    
+    networks:
+      - benchmark-network
+    
+    # Comando para análisis (usar docker compose run log-analyzer)
+    command: ["python", "analyze_logs.py", "--days", "7", "--format", "all"]
+    
+    profiles:
+      - tools  # Solo se ejecuta con: docker compose --profile tools up
+
+# Configuración de red
+networks:
+  benchmark-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volúmenes nombrados opcionales
+volumes:
+  benchmark-logs:
+    driver: local
+  benchmark-results:
+    driver: local

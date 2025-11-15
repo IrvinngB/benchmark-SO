@@ -45,6 +45,9 @@ from rich import box
 import warnings
 warnings.filterwarnings('ignore')
 
+# Importar LogManager
+from logging_manager import get_log_manager
+
 # ============================================================================
 # CONFIGURACIÓN
 # ============================================================================
@@ -229,17 +232,25 @@ class AsyncBenchmarkEngine:
         """Verifica la conectividad con el servidor"""
         server_addr = self.config.servers[environment["name"]]
         health_url = f"http://{server_addr}/health"
+        log_manager = get_log_manager()
         
         try:
+            start_time = time.perf_counter()
             async with self.session.get(health_url) as response:
+                end_time = time.perf_counter()
+                response_time_ms = (end_time - start_time) * 1000
+                
                 if response.status == 200:
                     self.console.print(f"[green]✅ Servidor accesible: {health_url}[/green]")
+                    log_manager.log_connectivity_test(environment["name"], health_url, True, response_time_ms)
                     return True
                 else:
                     self.console.print(f"[red]❌ Servidor responde con código {response.status}[/red]")
+                    log_manager.log_connectivity_test(environment["name"], health_url, False, response_time_ms)
                     return False
         except Exception as e:
             self.console.print(f"[red]❌ Error de conectividad: {e}[/red]")
+            log_manager.log_error(f"Error de conectividad en {health_url}: {str(e)}", exc_info=False)
             return False
     
     async def single_request(self, url: str) -> Tuple[bool, float, int]:
@@ -622,7 +633,13 @@ class BenchmarkUI:
 # ============================================================================
 
 async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[BenchmarkResult]:
-    """Ejecuta el benchmark completo"""
+    """Ejecuta el benchmark completo con logging integrado"""
+    
+    # Obtener instancia del LogManager
+    log_manager = get_log_manager()
+    
+    # Registrar inicio del benchmark
+    log_manager.log_benchmark_start(asdict(config) if hasattr(config, '__dict__') else config.__dict__)
     
     ui = BenchmarkUI()
     analyzer = BenchmarkAnalyzer(config.results_dir)
@@ -631,10 +648,12 @@ async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[B
         ui.show_header(config)
     
     all_results = []
+    benchmark_start_time = time.perf_counter()
     
     async with AsyncBenchmarkEngine(config) as engine:
         # Iniciar monitoreo de sistema
         engine.monitor.start_monitoring()
+        log_manager.log_info("Monitoreo de recursos iniciado", category="general")
         
         try:
             # Crear semáforo para controlar concurrencia
@@ -647,13 +666,17 @@ async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[B
                 # Verificar conectividad
                 if not await engine.test_connectivity(env):
                     engine.console.print(f"[red]❌ Saltando entorno {env['name']} por falta de conectividad[/red]")
+                    log_manager.log_warning(f"Entorno {env['name']} omitido por falta de conectividad")
                     continue
                 
+                # Registrar inicio de entorno
+                log_manager.log_environment_start(env)
                 engine.console.print(f"\n[bold blue]🌍 Ejecutando benchmarks para {env['label']}[/bold blue]")
                 
                 # Ejecutar múltiples runs
                 for test_num in range(1, config.num_tests + 1):
                     engine.console.print(f"\n[yellow]📍 Ejecución {test_num}/{config.num_tests}[/yellow]")
+                    log_manager.log_test_execution(test_num, config.num_tests)
                     
                     # Crear tareas para todos los endpoints del run actual
                     tasks = []
@@ -670,10 +693,15 @@ async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[B
                     # Procesar resultados
                     for result in results:
                         if isinstance(result, Exception):
-                            engine.console.print(f"[red]Error en benchmark: {result}[/red]")
+                            error_msg = f"Error en benchmark: {str(result)}"
+                            engine.console.print(f"[red]{error_msg}[/red]")
+                            log_manager.log_error(error_msg, exc_info=False)
                         else:
                             all_results.append(result)
                             current_test += 1
+                            
+                            # Registrar resultado del endpoint
+                            log_manager.log_endpoint_result(asdict(result))
                             
                             if verbose:
                                 progress = (current_test / total_tests) * 100
@@ -682,10 +710,23 @@ async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[B
                                     f"{result.requests_per_second:.2f} RPS, "
                                     f"{result.avg_latency_ms:.2f}ms latency"
                                 )
+                
+                # Registrar fin de entorno
+                log_manager.log_environment_end(env['name'], True)
+        
+        except Exception as e:
+            log_manager.log_error(f"Error critico en benchmark: {str(e)}", exc_info=True)
+            raise
         
         finally:
             # Detener monitoreo
             engine.monitor.stop_monitoring()
+            log_manager.log_info("Monitoreo de recursos detenido", category="general")
+    
+    # Registrar fin del benchmark y guardar resumen
+    benchmark_end_time = time.perf_counter()
+    total_time = benchmark_end_time - benchmark_start_time
+    log_manager.log_benchmark_end(total_time, len(all_results))
     
     return all_results
 
@@ -769,8 +810,13 @@ def main():
                        help='Output detallado')
     parser.add_argument('--analyze-only', '-a', type=str,
                        help='Solo analizar resultados existentes (ruta al directorio)')
+    parser.add_argument('--log-dir', type=str, default='.logs',
+                       help='Directorio para logs (default: .logs)')
     
     args = parser.parse_args()
+    
+    # Inicializar LogManager con directorio personalizado
+    log_manager = get_log_manager(args.log_dir)
     
     # Configurar benchmark
     config = BenchmarkConfig(
@@ -782,15 +828,19 @@ def main():
     )
     
     console = Console()
+    log_manager.log_info(f"Iniciando FastAPI Performance Benchmark", category="general")
+    log_manager.log_info(f"Argumentos: tests={args.tests}, connections={args.connections}, requests={args.requests}", category="config")
     
     # Solo análisis de datos existentes
     if args.analyze_only:
+        log_manager.log_info(f"Ejecutando modo análisis-solo para directorio: {args.analyze_only}", category="general")
         analyzer = BenchmarkAnalyzer(args.analyze_only)
         
         # Buscar archivos CSV más recientes
         csv_files = list(Path(args.analyze_only).glob("benchmark_detailed_*.csv"))
         if csv_files:
             latest_csv = sorted(csv_files)[-1]
+            log_manager.log_info(f"Analizando archivo: {latest_csv}", category="general")
             df = pd.read_csv(latest_csv)
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -798,8 +848,10 @@ def main():
             report = analyzer.generate_report(df, timestamp)
             
             console.print("[green]✅ Análisis completado - Resultados en: resultados_muestra/[/green]")
+            log_manager.log_info("Análisis completado exitosamente", category="general")
         else:
             console.print("[red]❌ No se encontraron archivos CSV en el directorio[/red]")
+            log_manager.log_warning("No se encontraron archivos CSV para analizar")
         return
     
     # Iniciar dashboard web si se solicita
@@ -807,11 +859,13 @@ def main():
         dashboard_thread = threading.Thread(target=create_live_dashboard, daemon=True)
         dashboard_thread.start()
         console.print("[green]🌐 Dashboard iniciado en http://localhost:5000[/green]")
+        log_manager.log_info("Dashboard web iniciado en http://localhost:5000", category="general")
     
     # Ejecutar benchmark
     async def run():
         try:
             console.print("[bold green]🚀 Iniciando benchmark...[/bold green]")
+            log_manager.log_info("Iniciando ejecución del benchmark", category="general")
             
             results = await run_benchmark(config, args.verbose)
             
@@ -821,6 +875,7 @@ def main():
                 analyzer = BenchmarkAnalyzer(config.results_dir)
                 
                 console.print(f"\n[bold cyan]📊 Procesando {len(results)} resultados...[/bold cyan]")
+                log_manager.log_info(f"Procesando {len(results)} resultados de benchmark", category="general")
                 
                 df = analyzer.save_results(results, timestamp)
                 analyzer.create_visualizations(df, timestamp)
@@ -828,6 +883,8 @@ def main():
                 
                 console.print(f"\n[bold green]✅ Benchmark completado exitosamente[/bold green]")
                 console.print(f"📁 Resultados guardados en: resultados_muestra/")
+                log_manager.log_info("Benchmark completado exitosamente", category="general")
+                log_manager.log_info(f"Resultados guardados en: {config.results_dir}/", category="general")
                 console.print(f"📊 Archivos generados:")
                 console.print(f"   - CSV detallado con todas las métricas")
                 console.print(f"   - JSON estructurado para análisis")
