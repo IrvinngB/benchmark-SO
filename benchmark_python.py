@@ -150,6 +150,7 @@ class SystemMonitor:
     
     def _monitor_loop(self):
         """Loop principal del monitoreo"""
+        log_manager = get_log_manager()  # Obtener instancia del LogManager
         while self.monitoring:
             try:
                 # Obtener métricas del sistema
@@ -172,10 +173,18 @@ class SystemMonitor:
                 self.metrics_queue.put(metrics)
                 self.metrics_history.append(metrics)
                 
+                # Log de métricas del sistema
+                log_manager.system_logger.debug(
+                    f"CPU: {cpu_percent:.1f}% | Memory: {memory.used/(1024*1024):.1f}MB | "
+                    f"Disk R: {disk.read_bytes if disk else 0} | Disk W: {disk.write_bytes if disk else 0} | "
+                    f"Net TX: {network.bytes_sent} | Net RX: {network.bytes_recv}"
+                )
+                
                 time.sleep(0.5)  # Monitorear cada 500ms
                 
             except Exception as e:
                 self.console.print(f"[red]Error en monitoreo: {e}[/red]")
+                log_manager.log_error(f"Error en monitoreo de sistema: {e}")
                 
     def get_current_metrics(self) -> Optional[SystemMetrics]:
         """Obtiene las métricas actuales"""
@@ -247,11 +256,13 @@ class AsyncBenchmarkEngine:
                     return False
         except Exception as e:
             self.console.print(f"[red]❌ Error de conectividad: {e}[/red]")
+            log_manager.log_connectivity_test(environment["name"], health_url, False)
             log_manager.log_error(f"Error de conectividad en {health_url}: {str(e)}", exc_info=False)
             return False
     
     async def single_request(self, url: str) -> Tuple[bool, float, int]:
         """Realiza una request individual y mide latencia"""
+        log_manager = get_log_manager()
         start_time = time.perf_counter()
         try:
             async with self.session.get(url) as response:
@@ -262,11 +273,15 @@ class AsyncBenchmarkEngine:
                 response_size = len(content)
                 success = 200 <= response.status < 400
                 
+                if not success:
+                    log_manager.log_warning(f"Request failed: {url} -> Status {response.status}")
+                
                 return success, latency_ms, response_size
                 
         except Exception as e:
             end_time = time.perf_counter()
             latency_ms = (end_time - start_time) * 1000
+            log_manager.log_error(f"Request error: {url} -> {e}", exc_info=False)
             return False, latency_ms, 0
     
     async def benchmark_endpoint(
@@ -357,7 +372,7 @@ class AsyncBenchmarkEngine:
         else:
             avg_cpu = avg_memory = network_sent = network_recv = 0
         
-        return BenchmarkResult(
+        result = BenchmarkResult(
             timestamp=start_time.strftime("%Y-%m-%d %H:%M:%S"),
             test_number=test_number,
             environment=environment["name"],
@@ -381,6 +396,12 @@ class AsyncBenchmarkEngine:
             network_bytes_sent=network_sent,
             network_bytes_recv=network_recv
         )
+        
+        # Log del resultado del endpoint
+        log_manager = get_log_manager()
+        log_manager.log_endpoint_result(asdict(result))
+        
+        return result
 
 # ============================================================================
 # VISUALIZACIÓN Y ANÁLISIS
@@ -745,13 +766,13 @@ async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[B
                     continue
                 
                 # Registrar inicio de entorno
-                log_manager.log_environment_start(env)
+                log_manager.log_info(f"Iniciando benchmarks para entorno: {env['label']}")
                 engine.console.print(f"\n[bold blue]🌍 Ejecutando benchmarks para {env['label']}[/bold blue]")
                 
                 # Ejecutar múltiples runs
                 for test_num in range(1, config.num_tests + 1):
                     engine.console.print(f"\n[yellow]📍 Ejecución {test_num}/{config.num_tests}[/yellow]")
-                    log_manager.log_test_execution(test_num, config.num_tests)
+                    log_manager.log_info(f"Ejecutando test {test_num}/{config.num_tests}")
                     
                     # Crear tareas para todos los endpoints del run actual
                     tasks = []
@@ -787,10 +808,11 @@ async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[B
                                 )
                 
                 # Registrar fin de entorno
-                log_manager.log_environment_end(env['name'], True)
+                log_manager.log_info(f"Completados benchmarks para entorno: {env['label']}")
         
         except Exception as e:
-            log_manager.log_error(f"Error critico en benchmark: {str(e)}", exc_info=True)
+            log_manager.log_error(f"Error crítico en benchmark: {str(e)}", exc_info=True)
+            engine.console.print(f"[red]❌ Error crítico durante ejecución: {e}[/red]")
             raise
         
         finally:

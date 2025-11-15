@@ -5,17 +5,20 @@ Logging Manager para FastAPI Performance Benchmark
 Sistema avanzado de logging con:
 - Rotación automática diaria
 - Múltiples niveles de severidad
-- Separación de logs por categoría
-- Compresión de logs antiguos
-- Análisis y reportes automáticos
+- Separación de logs por categoría específica
+- Creación automática de directorios cross-platform
+- Rutas absolutas para máxima compatibilidad
+- Singleton thread-safe
+- Logging resiliente ante crashes
 
 Estructura de Carpetas:
 .logs/
-├── daily/              # Logs generales diarios (YYYY-MM-DD.log)
-├── errors/             # Logs de errores filtrados (YYYY-MM-DD_errors.log)
-├── performance/        # Métricas de rendimiento (YYYY-MM-DD_performance.log)
-├── archive/            # Logs comprimidos de más de 7 días
-└── README.md           # Documentación del sistema de logging
+├── errors/             # Logs de errores (error_YYYY-MM-DD.log)
+├── requests/           # Logs de requests HTTP (requests_YYYY-MM-DD.log)
+├── system/             # Monitoreo sistema (system_YYYY-MM-DD.log)
+├── benchmark/          # Eventos benchmark (benchmark_YYYY-MM-DD.log)
+├── connectivity/       # Tests conectividad (connectivity_YYYY-MM-DD.log)
+└── README.md           # Documentación del sistema
 """
 
 import logging
@@ -25,97 +28,71 @@ import sys
 import gzip
 import shutil
 import json
+import warnings
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import threading
 import traceback
+import atexit
 
 
-class DailyRotatingFileHandler(logging.FileHandler):
-    """Handler personalizado con rotación diaria automática"""
+class SafeDailyRotatingFileHandler(logging.FileHandler):
+    """Handler robusto con rotación diaria y manejo de errores"""
     
-    def __init__(self, log_dir: Path, prefix: str = ""):
-        self.log_dir = Path(log_dir)
-        self.prefix = prefix
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Crear nombre de archivo con fecha actual
+    def __init__(self, log_dir: Path, log_type: str):
+        self.log_dir = Path(log_dir).resolve()  # Ruta absoluta
+        self.log_type = log_type
         self.current_date = datetime.now().date()
-        filename = self._get_filename()
         
-        super().__init__(str(filename))
+        # Crear directorio con manejo de errores
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            warnings.warn(f"No se pudo crear directorio {self.log_dir} por permisos")
+            # Fallback a directorio actual
+            self.log_dir = Path.cwd().resolve() / ".logs_fallback" / log_type
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+        
+        filename = self._get_filename()
+        super().__init__(str(filename), mode='a', encoding='utf-8')
         
     def _get_filename(self) -> Path:
-        """Genera nombre de archivo basado en fecha actual"""
+        """Genera nombre de archivo con formato específico"""
         date_str = datetime.now().strftime("%Y-%m-%d")
-        
-        if self.prefix:
-            filename = f"{date_str}_{self.prefix}.log"
-        else:
-            filename = f"{date_str}.log"
-        
+        filename = f"{self.log_type}_{date_str}.log"
         return self.log_dir / filename
     
     def emit(self, record: logging.LogRecord) -> None:
-        """Override para verificar rotación diaria"""
-        # Verificar si cambió la fecha
-        current_date = datetime.now().date()
-        if current_date != self.current_date:
-            # Rotar archivo
-            self._rotate_file()
-            self.current_date = current_date
+        """Override para verificar rotación diaria y manejo seguro"""
+        try:
+            # Verificar si cambió la fecha
+            current_date = datetime.now().date()
+            if current_date != self.current_date:
+                self._rotate_to_new_day()
+                self.current_date = current_date
             
-            # Crear nuevo archivo
+            super().emit(record)
+            
+        except Exception as e:
+            # Fallback a stderr si hay problemas con archivos
+            fallback_msg = f"[LOG ERROR] {record.getMessage()}"
+            print(fallback_msg, file=sys.stderr)
+            print(f"[LOG ERROR DETAILS] {e}", file=sys.stderr)
+    
+    def _rotate_to_new_day(self) -> None:
+        """Rotar a nuevo archivo para el nuevo día"""
+        try:
             new_filename = self._get_filename()
             self.close()
-            self.stream = self._open()
             self.baseFilename = str(new_filename)
-        
-        super().emit(record)
-    
-    def _rotate_file(self) -> None:
-        """Comprime el archivo anterior"""
-        try:
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-            
-            if self.prefix:
-                old_filename = self.log_dir / f"{yesterday}_{self.prefix}.log"
-            else:
-                old_filename = self.log_dir / f"{yesterday}.log"
-            
-            if old_filename.exists() and (datetime.now().time().hour >= 1):  # Rotar después de medianoche
-                # Comprimir archivo antiguo si es más de 7 días
-                file_age = datetime.now() - datetime.fromtimestamp(old_filename.stat().st_mtime)
-                if file_age.days > 7:
-                    self._compress_and_archive(old_filename)
-        
+            self.stream = self._open()
         except Exception as e:
-            # No fallar si hay error en rotación
-            print(f"Error durante rotación de logs: {e}", file=sys.stderr)
-    
-    def _compress_and_archive(self, filepath: Path) -> None:
-        """Comprime y mueve archivo antiguo al directorio de archivo"""
-        try:
-            archive_dir = self.log_dir.parent / "archive"
-            archive_dir.mkdir(exist_ok=True)
-            
-            # Crear archivo comprimido
-            gzip_path = archive_dir / f"{filepath.name}.gz"
-            
-            with open(filepath, 'rb') as f_in:
-                with gzip.open(gzip_path, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            
-            # Eliminar original
-            filepath.unlink()
-            
-        except Exception as e:
-            print(f"Error comprimiendo archivo: {e}", file=sys.stderr)
+            print(f"Error durante rotación: {e}", file=sys.stderr)
 
 
 class BenchmarkLogManager:
-    """Gestor centralizado de logging para benchmarking"""
+    """Gestor centralizado de logging para benchmarking - Singleton thread-safe"""
     
     _instance = None
     _lock = threading.Lock()
@@ -130,87 +107,135 @@ class BenchmarkLogManager:
         return cls._instance
     
     def __init__(self, log_root: Optional[str] = None):
-        """Inicializar LogManager con estructura de directorios"""
-        if self._initialized:
+        """Inicializar LogManager con estructura de directorios requerida"""
+        if hasattr(self, '_initialized') and self._initialized:
             return
         
-        # Usar directorio proporcionado o usar default
+        # Configurar ruta raíz de logs con ruta absoluta
         if log_root is None:
-            log_root = Path(__file__).parent / ".logs"
+            self.log_root = Path(__file__).parent.resolve() / ".logs"
         else:
-            log_root = Path(log_root)
+            self.log_root = Path(log_root).resolve()
         
-        self.log_root = log_root
-        self.daily_dir = log_root / "daily"
-        self.error_dir = log_root / "errors"
-        self.performance_dir = log_root / "performance"
-        self.archive_dir = log_root / "archive"
+        # Definir estructura de directorios específica
+        self.errors_dir = self.log_root / "errors"
+        self.requests_dir = self.log_root / "requests" 
+        self.system_dir = self.log_root / "system"
+        self.benchmark_dir = self.log_root / "benchmark"
+        self.connectivity_dir = self.log_root / "connectivity"
         
-        # Crear directorios
-        for dir_path in [self.daily_dir, self.error_dir, self.performance_dir, self.archive_dir]:
-            dir_path.mkdir(parents=True, exist_ok=True)
+        # Crear directorios inmediatamente
+        self.create_directories()
         
-        # Inicializar loggers
-        self.loggers = {}
+        # Inicializar loggers especializados
         self._setup_loggers()
         
         # Crear README
         self._create_readme()
         
+        # Registrar cleanup en exit
+        atexit.register(self._cleanup_on_exit)
+        
         self._initialized = True
     
+    def create_directories(self) -> None:
+        """Crear TODAS las carpetas necesarias con manejo de errores"""
+        directories = [
+            self.errors_dir,
+            self.requests_dir,
+            self.system_dir, 
+            self.benchmark_dir,
+            self.connectivity_dir
+        ]
+        
+        created_dirs = []
+        failed_dirs = []
+        
+        for dir_path in directories:
+            try:
+                dir_path.mkdir(parents=True, exist_ok=True)
+                created_dirs.append(str(dir_path))
+                print(f"✅ Directorio creado/verificado: {dir_path}")
+            except PermissionError as e:
+                failed_dirs.append(str(dir_path))
+                warnings.warn(f"⚠️ No se pudo crear {dir_path} por permisos: {e}")
+            except Exception as e:
+                failed_dirs.append(str(dir_path))
+                warnings.warn(f"⚠️ Error creando {dir_path}: {e}")
+        
+        if created_dirs:
+            print(f"📁 {len(created_dirs)} directorios listos")
+        if failed_dirs:
+            print(f"⚠️ {len(failed_dirs)} directorios fallaron")
+    
+    def _cleanup_on_exit(self) -> None:
+        """Cleanup al cerrar aplicación"""
+        try:
+            for logger_name, logger in self._get_all_loggers().items():
+                for handler in logger.handlers:
+                    handler.close()
+        except:
+            pass  # Ignore cleanup errors
+    
     def _setup_loggers(self) -> None:
-        """Configurar múltiples loggers especializados"""
+        """Configurar loggers especializados para cada categoría"""
         
-        # 1. Logger General (STDOUT + FILE)
-        self.general_logger = self._create_logger(
-            name="benchmark.general",
-            handlers=[
-                ('console', logging.StreamHandler(sys.stdout), logging.INFO),
-                ('file', DailyRotatingFileHandler(self.daily_dir), logging.DEBUG),
-            ]
-        )
-        
-        # 2. Logger de Errores (STDERR + FILE)
+        # 1. Logger de Errores (CONSOLE + FILE)
         self.error_logger = self._create_logger(
             name="benchmark.errors",
             handlers=[
-                ('console', logging.StreamHandler(sys.stderr), logging.ERROR),
-                ('file', DailyRotatingFileHandler(self.error_dir, "errors"), logging.WARNING),
+                ('console', logging.StreamHandler(sys.stderr), logging.WARNING),
+                ('file', SafeDailyRotatingFileHandler(self.errors_dir, "error"), logging.DEBUG),
             ]
         )
         
-        # 3. Logger de Rendimiento (FILE ONLY)
-        self.performance_logger = self._create_logger(
-            name="benchmark.performance",
+        # 2. Logger de Requests HTTP (CONSOLE + FILE)
+        self.request_logger = self._create_logger(
+            name="benchmark.requests",
             handlers=[
-                ('file', DailyRotatingFileHandler(self.performance_dir, "performance"), logging.DEBUG),
+                ('console', logging.StreamHandler(sys.stdout), logging.INFO),
+                ('file', SafeDailyRotatingFileHandler(self.requests_dir, "requests"), logging.DEBUG),
             ]
         )
         
-        # 4. Logger de Conectividad (FILE ONLY)
+        # 3. Logger de Sistema/Monitoreo (FILE ONLY)
+        self.system_logger = self._create_logger(
+            name="benchmark.system",
+            handlers=[
+                ('file', SafeDailyRotatingFileHandler(self.system_dir, "system"), logging.DEBUG),
+            ]
+        )
+        
+        # 4. Logger de Benchmark General (CONSOLE + FILE)
+        self.benchmark_logger = self._create_logger(
+            name="benchmark.general",
+            handlers=[
+                ('console', logging.StreamHandler(sys.stdout), logging.INFO),
+                ('file', SafeDailyRotatingFileHandler(self.benchmark_dir, "benchmark"), logging.DEBUG),
+            ]
+        )
+        
+        # 5. Logger de Conectividad (CONSOLE + FILE)
         self.connectivity_logger = self._create_logger(
             name="benchmark.connectivity",
             handlers=[
-                ('file', DailyRotatingFileHandler(self.performance_dir, "connectivity"), logging.INFO),
+                ('console', logging.StreamHandler(sys.stdout), logging.INFO),
+                ('file', SafeDailyRotatingFileHandler(self.connectivity_dir, "connectivity"), logging.DEBUG),
             ]
         )
         
-        # 5. Logger de Configuración (FILE ONLY)
-        self.config_logger = self._create_logger(
-            name="benchmark.config",
-            handlers=[
-                ('file', DailyRotatingFileHandler(self.daily_dir, "config"), logging.INFO),
-            ]
-        )
-        
+        # Diccionario para acceso fácil
         self.loggers = {
-            'general': self.general_logger,
             'error': self.error_logger,
-            'performance': self.performance_logger,
+            'request': self.request_logger,
+            'system': self.system_logger,
+            'benchmark': self.benchmark_logger,
             'connectivity': self.connectivity_logger,
-            'config': self.config_logger,
         }
+    
+    def _get_all_loggers(self) -> Dict[str, logging.Logger]:
+        """Obtener todos los loggers para cleanup"""
+        return getattr(self, 'loggers', {})
     
     def _create_logger(self, name: str, handlers: List[tuple]) -> logging.Logger:
         """Crear logger con handlers personalizados"""
@@ -376,146 +401,119 @@ python export_logs.py --format csv --output reports/
                 f.write(readme_content)
     
     # ========================================================================
-    # MÉTODOS DE LOGGING
+    # MÉTODOS DE LOGGING PRINCIPALES
     # ========================================================================
     
-    def log_benchmark_start(self, config: Dict) -> None:
-        """Registrar inicio de ejecución de benchmark"""
-        self.general_logger.info("=" * 80)
-        self.general_logger.info("🚀 INICIO DE BENCHMARK")
-        self.general_logger.info("=" * 80)
-        
-        self.config_logger.info(f"Número de pruebas: {config.get('num_tests', 'N/A')}")
-        self.config_logger.info(f"Requests por test: {config.get('default_requests', 'N/A')}")
-        self.config_logger.info(f"Conexiones concurrentes: {config.get('default_connections', 'N/A')}")
-        self.config_logger.info(f"Directorio de resultados: {config.get('results_dir', 'N/A')}")
-        
-        # Log de entornos
-        if 'environments' in config:
-            self.config_logger.info(f"Entornos a probar: {len(config['environments'])}")
-            for env in config['environments']:
-                self.config_logger.info(f"  - {env.get('name')}: {env.get('label')}")
+    def log_info(self, msg: str, category: str = "general") -> None:
+        """Registrar información general"""
+        if category == "general":
+            self.benchmark_logger.info(msg)
+        elif category in self.loggers:
+            self.loggers[category].info(msg)
+        else:
+            self.benchmark_logger.info(f"[{category}] {msg}")
     
-    def log_benchmark_end(self, total_time_seconds: float, results_count: int) -> None:
-        """Registrar fin de ejecución de benchmark"""
-        self.general_logger.info("=" * 80)
-        self.general_logger.info("✅ BENCHMARK COMPLETADO")
-        self.general_logger.info("=" * 80)
-        self.general_logger.info(f"Tiempo total: {total_time_seconds:.2f} segundos ({total_time_seconds/60:.2f} minutos)")
-        self.general_logger.info(f"Resultados procesados: {results_count}")
-        self.general_logger.info("")
+    def log_warning(self, msg: str, category: str = "general") -> None:
+        """Registrar advertencia"""
+        if category == "general":
+            self.error_logger.warning(msg)
+        elif category in self.loggers:
+            self.loggers[category].warning(msg)
+        else:
+            self.error_logger.warning(f"[{category}] {msg}")
     
-    def log_environment_start(self, environment: Dict) -> None:
-        """Registrar inicio de pruebas en un entorno"""
-        self.general_logger.info(f"\n{'─' * 60}")
-        self.general_logger.info(f"🌍 INICIANDO PRUEBAS: {environment.get('label')}")
-        self.general_logger.info(f"{'─' * 60}")
-        
-        self.connectivity_logger.info(f"Comenzando pruebas en {environment.get('name')} ({environment.get('label')})")
-    
-    def log_environment_end(self, environment: str, success: bool) -> None:
-        """Registrar fin de pruebas en un entorno"""
-        status = "✅ EXITOSAS" if success else "❌ FALLIDAS"
-        self.general_logger.info(f"Pruebas en {environment}: {status}")
+    def log_error(self, msg: str, exc_info: bool = True) -> None:
+        """Registrar error con información de excepción opcional"""
+        if exc_info:
+            self.error_logger.exception(msg)
+        else:
+            self.error_logger.error(msg)
     
     def log_connectivity_test(self, environment: str, url: str, success: bool, response_time_ms: float = 0) -> None:
         """Registrar resultado de prueba de conectividad"""
-        status = "✅" if success else "❌"
-        level = logging.INFO if success else logging.WARNING
+        status = "✅ SUCCESS" if success else "❌ FAILED"
         
         if success:
-            self.connectivity_logger.log(level, f"{status} Conectividad OK: {url} ({response_time_ms:.2f}ms)")
+            msg = f"{status} | {environment} | {url} | {response_time_ms:.2f}ms"
+            self.connectivity_logger.info(msg)
         else:
-            self.connectivity_logger.log(level, f"{status} Error de conectividad: {url}")
-            self.error_logger.warning(f"Fallo de conectividad: {url}")
+            msg = f"{status} | {environment} | {url} | TIMEOUT/ERROR"
+            self.connectivity_logger.warning(msg)
+            self.error_logger.warning(f"Connectivity failed: {environment} -> {url}")
     
-    def log_test_execution(self, test_number: int, total_tests: int) -> None:
-        """Registrar ejecución de un test específico"""
-        progress = (test_number / total_tests) * 100
-        self.general_logger.debug(f"  [{progress:5.1f}%] Ejecutando test {test_number}/{total_tests}")
-    
-    def log_endpoint_result(self, result: Dict) -> None:
-        """Registrar resultado de benchmark de endpoint"""
-        # Log general
-        self.general_logger.info(
-            f"  ✅ {result.get('endpoint_name')}: "
-            f"{result.get('requests_per_second', 0):.2f} RPS, "
-            f"{result.get('avg_latency_ms', 0):.2f}ms, "
-            f"{result.get('error_rate', 0):.2f}% errors"
+    def log_endpoint_result(self, data_dict: Dict[str, Any]) -> None:
+        """Registrar resultado completo de endpoint"""
+        # Log de request/respuesta
+        endpoint = data_dict.get('endpoint_name', 'Unknown')
+        environment = data_dict.get('environment', 'Unknown')
+        rps = data_dict.get('requests_per_second', 0)
+        latency = data_dict.get('avg_latency_ms', 0)
+        errors = data_dict.get('error_rate', 0)
+        
+        self.request_logger.info(
+            f"ENDPOINT | {endpoint} | {environment} | "
+            f"RPS: {rps:.2f} | Latency: {latency:.2f}ms | Errors: {errors:.2f}%"
         )
         
-        # Log detallado de rendimiento
-        self.performance_logger.debug(
-            f"Endpoint: {result.get('endpoint_name')} | "
-            f"Environment: {result.get('environment')} | "
-            f"RPS: {result.get('requests_per_second', 0):.2f} | "
-            f"Latency: {result.get('avg_latency_ms', 0):.2f}ms | "
-            f"P95: {result.get('p95_latency_ms', 0):.2f}ms | "
-            f"P99: {result.get('p99_latency_ms', 0):.2f}ms | "
-            f"CPU: {result.get('cpu_usage_percent', 0):.1f}% | "
-            f"Memory: {result.get('memory_usage_mb', 0):.1f}MB | "
-            f"Errors: {result.get('failed_requests', 0)}/{result.get('total_requests', 0)}"
-        )
+        # Log de métricas del sistema si están disponibles
+        if any(key in data_dict for key in ['cpu_usage_percent', 'memory_usage_mb']):
+            cpu = data_dict.get('cpu_usage_percent', 0)
+            memory = data_dict.get('memory_usage_mb', 0)
+            self.system_logger.debug(
+                f"METRICS | {endpoint} | CPU: {cpu:.1f}% | Memory: {memory:.1f}MB"
+            )
         
-        # Si hay errores, loguear en error log
-        if result.get('error_rate', 0) > 0:
+        # Log de errores si los hay
+        if errors > 0:
+            failed = data_dict.get('failed_requests', 0)
+            total = data_dict.get('total_requests', 0)
             self.error_logger.warning(
-                f"Errores detectados en {result.get('endpoint_name')}: "
-                f"{result.get('failed_requests')}/{result.get('total_requests')} requests"
+                f"ENDPOINT_ERRORS | {endpoint} | {failed}/{total} requests failed"
             )
     
-    def log_error(self, message: str, exc_info: bool = False) -> None:
-        """Registrar error con traceback opcional"""
-        if exc_info:
-            self.error_logger.exception(message)
-        else:
-            self.error_logger.error(message)
-    
-    def log_warning(self, message: str) -> None:
-        """Registrar advertencia"""
-        self.error_logger.warning(message)
-    
-    def log_info(self, message: str, category: str = "general") -> None:
-        """Registrar información"""
-        logger = self.loggers.get(category, self.general_logger)
-        logger.info(message)
-    
-    def log_debug(self, message: str, category: str = "general") -> None:
-        """Registrar información de debug"""
-        logger = self.loggers.get(category, self.general_logger)
-        logger.debug(message)
-    
-    def log_system_metrics(self, metrics: Dict) -> None:
-        """Registrar métricas del sistema durante ejecución"""
-        self.performance_logger.debug(
-            f"System Metrics - CPU: {metrics.get('cpu_percent', 0):.1f}% | "
-            f"Memory: {metrics.get('memory_mb', 0):.1f}MB | "
-            f"Network TX: {metrics.get('network_sent', 0)} bytes | "
-            f"Network RX: {metrics.get('network_recv', 0)} bytes"
-        )
-    
-    def log_summary(self, summary: Dict) -> None:
-        """Registrar resumen de ejecución"""
-        self.general_logger.info("\n" + "=" * 80)
-        self.general_logger.info("📊 RESUMEN DE EJECUCIÓN")
-        self.general_logger.info("=" * 80)
+    def log_benchmark_start(self, config_dict: Dict[str, Any]) -> None:
+        """Registrar inicio de benchmark con configuración"""
+        self.benchmark_logger.info("=" * 80)
+        self.benchmark_logger.info("🚀 BENCHMARK STARTED")
+        self.benchmark_logger.info("=" * 80)
         
-        for key, value in summary.items():
-            if isinstance(value, float):
-                self.general_logger.info(f"{key}: {value:.2f}")
+        # Log de configuración
+        for key, value in config_dict.items():
+            if key == 'environments' and isinstance(value, list):
+                self.benchmark_logger.info(f"Config | {key}: {len(value)} environments")
+                for env in value:
+                    if isinstance(env, dict):
+                        name = env.get('name', 'Unknown')
+                        label = env.get('label', 'Unknown')
+                        self.benchmark_logger.info(f"  - {name}: {label}")
             else:
-                self.general_logger.info(f"{key}: {value}")
-        
-        self.general_logger.info("=" * 80 + "\n")
+                self.benchmark_logger.info(f"Config | {key}: {value}")
+    
+    def log_benchmark_end(self, total_seconds: float, total_results: int) -> None:
+        """Registrar fin de benchmark con estadísticas"""
+        self.benchmark_logger.info("=" * 80)
+        self.benchmark_logger.info("✅ BENCHMARK COMPLETED")
+        self.benchmark_logger.info("=" * 80)
+        self.benchmark_logger.info(f"Total time: {total_seconds:.2f} seconds ({total_seconds/60:.2f} minutes)")
+        self.benchmark_logger.info(f"Total results: {total_results}")
+        self.benchmark_logger.info("=" * 80)
     
     def get_log_files_summary(self) -> Dict[str, List[str]]:
         """Obtener lista de archivos de log por categoría"""
-        summary = {
-            'daily': sorted([f.name for f in self.daily_dir.glob('*.log')]),
-            'errors': sorted([f.name for f in self.error_dir.glob('*.log')]),
-            'performance': sorted([f.name for f in self.performance_dir.glob('*.log')]),
-            'archived': sorted([f.name for f in self.archive_dir.glob('*.gz')]),
-        }
+        summary = {}
+        
+        for category, dir_path in [
+            ('errors', self.errors_dir),
+            ('requests', self.requests_dir), 
+            ('system', self.system_dir),
+            ('benchmark', self.benchmark_dir),
+            ('connectivity', self.connectivity_dir)
+        ]:
+            if dir_path.exists():
+                summary[category] = sorted([f.name for f in dir_path.glob('*.log')])
+            else:
+                summary[category] = []
+        
         return summary
     
     def export_daily_summary_json(self) -> Dict:
@@ -527,6 +525,13 @@ python export_logs.py --format csv --output reports/
             'timestamp': datetime.now().isoformat(),
             'log_files': self.get_log_files_summary(),
             'log_directory': str(self.log_root),
+            'directory_structure': {
+                'errors': str(self.errors_dir),
+                'requests': str(self.requests_dir),
+                'system': str(self.system_dir), 
+                'benchmark': str(self.benchmark_dir),
+                'connectivity': str(self.connectivity_dir)
+            }
         }
         
         return summary
@@ -539,21 +544,27 @@ python export_logs.py --format csv --output reports/
 def ensure_log_directories(log_root: Optional[str] = None) -> Path:
     """Asegurar que los directorios de log existan INMEDIATAMENTE"""
     if log_root is None:
-        log_root = Path(__file__).parent / ".logs"
+        log_root = Path(__file__).parent.resolve() / ".logs"
     else:
-        log_root = Path(log_root)
+        log_root = Path(log_root).resolve()
     
-    # Crear directorios inmediatamente
+    # Crear estructura de directorios requerida
     directories = [
-        log_root / "daily",
-        log_root / "errors", 
-        log_root / "performance",
-        log_root / "archive"
+        log_root / "errors",
+        log_root / "requests", 
+        log_root / "system",
+        log_root / "benchmark",
+        log_root / "connectivity"
     ]
     
     for dir_path in directories:
-        dir_path.mkdir(parents=True, exist_ok=True)
-        print(f"📁 Directorio creado/verificado: {dir_path}")
+        try:
+            dir_path.mkdir(parents=True, exist_ok=True)
+            print(f"📁 Directorio creado/verificado: {dir_path}")
+        except PermissionError:
+            print(f"⚠️ Sin permisos para crear: {dir_path}")
+        except Exception as e:
+            print(f"⚠️ Error creando {dir_path}: {e}")
     
     # Crear README inmediatamente
     readme_path = log_root / "README.md"
@@ -581,37 +592,71 @@ def _create_readme_immediate(log_root: Path) -> None:
 
 ```
 .logs/
-├── daily/           # Logs generales por día
-├── errors/          # Logs de errores y advertencias  
-├── performance/     # Logs de métricas de rendimiento
-├── archive/         # Logs comprimidos (>7 días)
+├── errors/          # Logs de errores y advertencias
+├── requests/        # Logs de requests HTTP y respuestas  
+├── system/          # Logs de monitoreo sistema (CPU, RAM, etc.)
+├── benchmark/       # Logs de eventos principales del benchmark
+├── connectivity/    # Logs de pruebas de conectividad
 └── README.md        # Este archivo
 ```
 
-## Uso
-
-### Logs Diarios
-- **Patrón:** `YYYY-MM-DD.log`
-- **Contenido:** Logs generales, inicio/fin de tests
+## Patrones de Archivos
 
 ### Logs de Errores
-- **Patrón:** `YYYY-MM-DD_errors.log` 
-- **Contenido:** Errores y advertencias
+- **Patrón:** `error_YYYY-MM-DD.log`
+- **Contenido:** Errores y advertencias del sistema
+- **Ejemplo:** `error_2025-11-15.log`
 
-### Logs de Rendimiento
-- **Patrón:** `YYYY-MM-DD_performance.log`
-- **Contenido:** Métricas (RPS, latencia, CPU, memoria)
+### Logs de Requests
+- **Patrón:** `requests_YYYY-MM-DD.log` 
+- **Contenido:** Requests HTTP, respuestas, métricas de endpoints
+- **Ejemplo:** `requests_2025-11-15.log`
 
-### Ver logs en tiempo real
+### Logs de Sistema
+- **Patrón:** `system_YYYY-MM-DD.log`
+- **Contenido:** CPU, RAM, red, disco - monitoreo del sistema
+- **Ejemplo:** `system_2025-11-15.log`
+
+### Logs de Benchmark
+- **Patrón:** `benchmark_YYYY-MM-DD.log`
+- **Contenido:** Inicio/fin de tests, configuración, resúmenes
+- **Ejemplo:** `benchmark_2025-11-15.log`
+
+### Logs de Conectividad
+- **Patrón:** `connectivity_YYYY-MM-DD.log`
+- **Contenido:** Pruebas de conectividad, timeouts, latencia
+- **Ejemplo:** `connectivity_2025-11-15.log`
+
+## Ver logs en tiempo real
+
 ```bash
-# Logs de hoy
-tail -f .logs/daily/$(date +%Y-%m-%d).log
+# Logs de benchmark hoy
+tail -f .logs/benchmark/benchmark_$(date +%Y-%m-%d).log
 
 # Errores de hoy  
-tail -f .logs/errors/$(date +%Y-%m-%d)_errors.log
+tail -f .logs/errors/error_$(date +%Y-%m-%d).log
 
-# Rendimiento de hoy
-tail -f .logs/performance/$(date +%Y-%m-%d)_performance.log
+# Requests de hoy
+tail -f .logs/requests/requests_$(date +%Y-%m-%d).log
+
+# Sistema de hoy
+tail -f .logs/system/system_$(date +%Y-%m-%d).log
+
+# Conectividad de hoy
+tail -f .logs/connectivity/connectivity_$(date +%Y-%m-%d).log
+```
+
+## Buscar eventos específicos
+
+```bash
+# Buscar errores
+grep -i error .logs/errors/error_$(date +%Y-%m-%d).log
+
+# Buscar resultados de endpoint específico
+grep "Heavy Computation" .logs/requests/requests_$(date +%Y-%m-%d).log
+
+# Buscar picos de CPU
+grep "CPU:" .logs/system/system_$(date +%Y-%m-%d).log | grep -E "9[0-9]|100"
 ```
 
 ---
@@ -623,44 +668,37 @@ tail -f .logs/performance/$(date +%Y-%m-%d)_performance.log
 
 def cleanup_old_logs(days_to_keep: int = 7, compress_after: int = 3) -> None:
     """Limpiar y comprimir logs antiguos"""
-    log_root = Path(__file__).parent / ".logs"
+    log_root = Path(__file__).parent.resolve() / ".logs"
     
     if not log_root.exists():
         return
     
     now = datetime.now()
     
-    for log_dir in [log_root / "daily", log_root / "errors", log_root / "performance"]:
+    # Directorios a limpiar
+    log_directories = [
+        log_root / "errors",
+        log_root / "requests", 
+        log_root / "system",
+        log_root / "benchmark",
+        log_root / "connectivity"
+    ]
+    
+    for log_dir in log_directories:
         if not log_dir.exists():
             continue
         
         for log_file in log_dir.glob("*.log"):
-            file_age = now - datetime.fromtimestamp(log_file.stat().st_mtime)
-            
-            # Comprimir si es más viejo que compress_after días
-            if file_age.days >= compress_after and file_age.days < days_to_keep:
-                try:
-                    archive_dir = log_root / "archive"
-                    archive_dir.mkdir(exist_ok=True)
-                    
-                    gzip_path = archive_dir / f"{log_file.name}.gz"
-                    with open(log_file, 'rb') as f_in:
-                        with gzip.open(gzip_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                    
-                    log_file.unlink()
-                    print(f"Comprimido: {log_file.name} -> {gzip_path.name}")
+            try:
+                file_age = now - datetime.fromtimestamp(log_file.stat().st_mtime)
                 
-                except Exception as e:
-                    print(f"Error comprimiendo {log_file}: {e}")
-            
-            # Eliminar si es más viejo que days_to_keep
-            elif file_age.days >= days_to_keep:
-                try:
+                # Eliminar si es más viejo que days_to_keep
+                if file_age.days >= days_to_keep:
                     log_file.unlink()
-                    print(f"Eliminado: {log_file.name}")
-                except Exception as e:
-                    print(f"Error eliminando {log_file}: {e}")
+                    print(f"🗑️ Eliminado: {log_file.name}")
+                    
+            except Exception as e:
+                print(f"⚠️ Error procesando {log_file}: {e}")
 
 
 # ============================================================================
@@ -681,9 +719,9 @@ if __name__ == "__main__":
     log_manager = get_log_manager()
     
     # Probar diferentes tipos de logs
-    log_manager.general_logger.info("✅ Test de log general")
-    log_manager.error_logger.warning("⚠️ Test de advertencia")
-    log_manager.performance_logger.debug("📊 Test de métrica de rendimiento")
+    log_manager.log_info("✅ Test de log general")
+    log_manager.log_warning("⚠️ Test de advertencia")
+    log_manager.log_error("❌ Test de error", exc_info=False)
     
     config = {
         'num_tests': 10,
@@ -691,20 +729,19 @@ if __name__ == "__main__":
         'default_connections': 100,
         'results_dir': 'benchmark_escalado',
         'environments': [
-            {'name': 'vps_no_docker', 'label': 'VPS Sin Docker'},
-            {'name': 'vps_docker', 'label': 'VPS Con Docker'}
+            {'name': 'local_docker', 'label': 'Docker Local'},
         ]
     }
     
     log_manager.log_benchmark_start(config)
     
-    # Simular prueba
-    log_manager.log_environment_start({'name': 'test', 'label': 'Test Environment'})
-    log_manager.log_connectivity_test('test', 'http://localhost:8000', True, 45.3)
+    # Simular prueba de conectividad
+    log_manager.log_connectivity_test('local_docker', 'http://localhost:8000', True, 45.3)
     
+    # Simular resultado de endpoint
     result = {
         'endpoint_name': 'Root Endpoint',
-        'environment': 'vps_no_docker',
+        'environment': 'local_docker',
         'requests_per_second': 682.79,
         'avg_latency_ms': 534.14,
         'p95_latency_ms': 612.95,
@@ -725,5 +762,7 @@ if __name__ == "__main__":
     for category, files in summary.items():
         if files:
             print(f"  {category}: {len(files)} archivo(s)")
+            for file in files:
+                print(f"    - {file}")
     
-    print("\n✅ Prueba completada - Revisar .logs/daily/ para ver los resultados")
+    print("\n✅ Prueba completada - Revisar directories .logs/ para ver los resultados")
