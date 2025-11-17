@@ -1,15 +1,6 @@
-# Logs generados por el sistema de logging
-.logs/
-*.log
-*.log.*
-*.gz
-
 # Configuraciones diarias generadas
 daily_config_*.json
 failure_report_*.json
-
-# Resultados de benchmarks diarios
-resultados_diarios/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -147,12 +138,5 @@ dmypy.json
 Thumbs.db
 
 # Project specific
-benchmark_results/
-benchmark_results_improved/
-benchmark_results_baseline/
-logs/
-
-
-
-
-ARTICULO_CIENTIFICO_FASTAPI_PERFORMANCE.md
+venv/
+.qodo/

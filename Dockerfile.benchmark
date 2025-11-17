@@ -1,0 +1,52 @@
+FROM python:3.11-slim
+
+LABEL maintainer="Benchmark Team"
+LABEL description="Automated Benchmark Runner with Logging"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    LOG_LEVEL=INFO \
+    BENCHMARK_ENV=docker
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    procps \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements*.txt ./
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    if [ -f "requirements-linux.txt" ]; then \
+        pip install --no-cache-dir -r requirements-linux.txt; \
+    else \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
+
+RUN useradd -m -u 1000 benchuser && \
+    mkdir -p /app/.logs /app/benchmark_results /app/resultados_diarios && \
+    chown -R benchuser:benchuser /app
+
+COPY --chown=benchuser:benchuser benchmark_python.py .
+COPY --chown=benchuser:benchuser logging_manager.py .
+COPY --chown=benchuser:benchuser analyze_logs.py .
+COPY --chown=benchuser:benchuser daily_benchmark.py .
+
+RUN mkdir -p .logs/{daily,errors,performance,archive} && \
+    chown -R benchuser:benchuser .logs
+
+COPY --chown=benchuser:benchuser scripts/crontab /etc/cron.d/benchmark-cron
+
+RUN chmod 0644 /etc/cron.d/benchmark-cron && \
+    crontab -u benchuser /etc/cron.d/benchmark-cron && \
+    touch /var/log/cron.log
+
+USER benchuser
+
+HEALTHCHECK --interval=60s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import sys; print('Benchmark container healthy'); sys.exit(0)" || exit 1
+
+CMD ["python", "benchmark_python.py"]

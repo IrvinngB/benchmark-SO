@@ -1,0 +1,8 @@
+# Ejecutar benchmarks 2 veces al día: 9:00 AM y 9:00 PM
+0 9 * * * cd /app && python benchmark_python.py >> /app/.logs/daily/cron_$(date +\%Y\%m\%d).log 2>&1
+0 21 * * * cd /app && python benchmark_python.py >> /app/.logs/daily/cron_$(date +\%Y\%m\%d).log 2>&1
+
+# Análisis de logs semanal: Domingos a las 11:00 PM
+0 23 * * 0 cd /app && python analyze_logs.py --days 7 --format all >> /app/.logs/daily/analysis_$(date +\%Y\%m\%d).log 2>&1
+
+# Línea vacía requerida por cron

@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  fastapi-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app-stage
+      args:
+        - PYTHON_VERSION=3.11
+    container_name: fastapi-app
+    restart: unless-stopped
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - TZ=America/Mexico_City
+    
+    ports:
+      - "8000:8000"
+    
+    volumes:
+      - ../benchmark-logs:/app/.logs:rw
+    
+    networks:
+      - benchmark-network
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  benchmark-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.benchmark
+    container_name: benchmark-scheduler
+    restart: unless-stopped
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - BENCHMARK_ENV=docker
+      - TZ=America/Mexico_City
+      - TARGET_URL=http://fastapi-app:8000
+    
+    volumes:
+      - ../benchmark-logs:/app/.logs:rw
+      - ../benchmark-results:/app/benchmark_results:rw
+      - ../benchmark-results:/app/benchmark_results_improved:rw
+      - ../benchmark-results:/app/resultados_diarios:rw
+      - ../benchmark-results:/app/resultados_nuevos:rw
+    
+    networks:
+      - benchmark-network
+    
+    depends_on:
+      fastapi-app:
+        condition: service_healthy
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    
+    command: ["sh", "-c", "cron && tail -f /var/log/cron.log"]
+
+  log-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.benchmark
+    container_name: log-manager
+    restart: "no"
+    profiles:
+      - tools
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    
+    volumes:
+      - ../benchmark-logs:/app/.logs:rw
+      - ../benchmark-results:/app/benchmark_results:rw
+    
+    networks:
+      - benchmark-network
+    
+    command: ["python", "analyze_logs.py", "--days", "7", "--format", "all"]
+
+networks:
+  benchmark-network:
+    driver: bridge
+    name: benchmark-network
+
+volumes:
+  logs-data:
+    driver: local
+  results-data:
+    driver: local
