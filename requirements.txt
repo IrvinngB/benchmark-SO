@@ -68,7 +68,7 @@ mypy>=1.3.0                     # Type checking
 # PERFORMANCE OPTIMIZATION - Optimizaciones adicionales
 # ============================================================================
 uvloop>=0.17.0; sys_platform != "win32"  # Event loop optimizado (Unix only)
-cchardet>=2.1.7                 # Detección de encoding optimizada
+charset-normalizer>=3.0.0               # Detección de encoding optimizada
 orjson>=3.8.0                   # JSON serialización ultra-rápida
 msgpack>=1.0.0                  # Serialización binaria eficiente
 
