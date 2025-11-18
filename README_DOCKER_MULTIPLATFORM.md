@@ -166,52 +166,89 @@ Asegúrate de que tienes estos archivos:
 
 ### Método 1: Docker Compose (Recomendado)
 
-```bash
-# Construir y ejecutar servicios
-docker compose up --build
+#### Iniciar el Servicio de FastAPI (Siempre Activo)
 
-# Para ejecutar en background
+```bash
+# Construir y ejecutar el servicio FastAPI en background
 docker compose up -d --build
 
-# Ver logs en tiempo real
-docker compose logs -f benchmark
+# Verificar que el servicio está corriendo
+docker compose ps
 
-# Detener servicios
+# Ver logs en tiempo real
+docker compose logs -f fastapi-app
+
+# Verificar el health del servicio
+curl http://localhost:8000/health
+
+# Detener el servicio
 docker compose down
+```
+
+#### Ejecutar Benchmarks Manualmente
+
+Con el servicio de FastAPI activo, ejecuta los benchmarks cuando lo necesites:
+
+```bash
+# Opción 1: Ejecutar benchmark usando docker compose (recomendado)
+docker compose --profile tools run --rm benchmark
+
+# Opción 2: Ejecutar benchmark con parámetros personalizados
+docker compose --profile tools run --rm benchmark python benchmark_python.py --tests 5 --connections 50
+
+# Opción 3: Ejecutar desde el contenedor de la app
+docker compose exec fastapi-app python benchmark_python.py
+
+# Opción 4: Ejecutar desde tu máquina local (requiere Python instalado)
+python benchmark_python.py  # Apuntará a http://localhost:8000
 ```
 
 ### Método 2: Docker Manual
 
 ```bash
-# Construir imagen
-docker build -t fastapi-benchmark:latest .
+# Construir imagen para FastAPI
+docker build -t fastapi-benchmark:latest --target app-stage .
 
-# Ejecutar benchmark con logs persistentes
-docker run -it --rm \
+# Ejecutar servicio FastAPI permanentemente
+docker run -d \
+  -p 8000:8000 \
   -v $(pwd)/.logs:/app/.logs \
   -v $(pwd)/benchmark_results:/app/benchmark_results \
-  -v $(pwd)/resultados_nuevos:/app/resultados_nuevos \
-  -v $(pwd)/resultados_vps:/app/resultados_vps \
-  --name fastapi-benchmark \
+  --name fastapi-app \
   fastapi-benchmark:latest
 
-# Para ejecutar con parámetros específicos
+# Verificar que está corriendo
+curl http://localhost:8000/health
+
+# Ejecutar benchmark manualmente (con el servicio activo)
+docker build -t fastapi-benchmark-runner:latest .
 docker run -it --rm \
+  --network host \
   -v $(pwd)/.logs:/app/.logs \
   -v $(pwd)/benchmark_results:/app/benchmark_results \
-  fastapi-benchmark:latest \
-  python benchmark_python.py --tests 5 --connections 50
+  fastapi-benchmark-runner:latest \
+  python benchmark_python.py
 ```
-
-# Correr contenedor
-docker run -d --name bench -p 8000:8000 fastapi-benchmark:latest
 
 
 ## 📊 Ejecución Diaria Recomendada (4 Semanas)
 
+### Configuración Inicial
+
+1. **Iniciar el servicio de FastAPI** (una sola vez):
+
+```bash
+# Iniciar el servicio en background
+docker compose up -d --build
+
+# Verificar que está corriendo
+docker compose ps
+curl http://localhost:8000/health
+```
+
 ### Configuración de Ejecución Diaria
 
-1. **Crear script diario** (`daily_benchmark.sh`):
+2. **Crear script diario** (`daily_benchmark.sh`):
 
 ```bash
 #!/bin/bash
@@ -224,20 +261,32 @@ echo "========================================" >> $LOG_FILE
 echo "Iniciando benchmark diario: $DATE" >> $LOG_FILE
 echo "Sistema: $(uname -a)" >> $LOG_FILE
 echo "Docker: $(docker --version)" >> $LOG_FILE
+
+# Verificar que el servicio FastAPI está activo
+echo "Verificando servicio FastAPI..." >> $LOG_FILE
+docker compose ps >> $LOG_FILE 2>&1
+
+if ! docker compose ps | grep -q "fastapi-app.*Up"; then
+    echo "⚠️ Servicio FastAPI no está activo. Iniciando..." >> $LOG_FILE
+    docker compose up -d --build >> $LOG_FILE 2>&1
+    sleep 10
+fi
+
 echo "========================================" >> $LOG_FILE
 
 # Ejecutar benchmark
-docker compose up --build >> $LOG_FILE 2>&1
+echo "Ejecutando benchmark..." >> $LOG_FILE
+docker compose --profile tools run --rm benchmark >> $LOG_FILE 2>&1
 
 echo "Benchmark completado: $(date)" >> $LOG_FILE
 ```
 
-2. **Hacer ejecutable:**
+3. **Hacer ejecutable:**
 ```bash
 chmod +x daily_benchmark.sh
 ```
 
-3. **Ejecutar manualmente cada día:**
+4. **Ejecutar manualmente cada día:**
 ```bash
 ./daily_benchmark.sh
 ```
@@ -331,17 +380,53 @@ deactivate
 
 ## 🔧 Comandos Útiles
 
+### Gestión del Servicio FastAPI
+
+```bash
+# Verificar estado del servicio
+docker compose ps
+
+# Ver logs del servicio en tiempo real
+docker compose logs -f fastapi-app
+
+# Reiniciar el servicio
+docker compose restart fastapi-app
+
+# Detener el servicio
+docker compose stop fastapi-app
+
+# Iniciar el servicio
+docker compose start fastapi-app
+
+# Acceder al contenedor del servicio
+docker compose exec fastapi-app /bin/bash
+
+# Verificar salud del servicio
+curl http://localhost:8000/health
+curl http://localhost:8000/
+```
+
+### Ejecución de Benchmarks
+
+```bash
+# Ejecutar benchmark una vez
+docker compose --profile tools run --rm benchmark
+
+# Ejecutar con parámetros personalizados
+docker compose --profile tools run --rm benchmark python benchmark_python.py --tests 5
+
+# Ejecutar desde el contenedor activo
+docker compose exec fastapi-app python benchmark_python.py
+```
+
 ### Monitoreo de Recursos
 
 ```bash
 # Ver uso de recursos del contenedor
-docker stats
+docker stats fastapi-benchmark-app
 
-# Ver logs específicos
-docker compose logs benchmark
-
-# Acceder al contenedor en ejecución
-docker compose exec benchmark /bin/bash
+# Ver todos los contenedores
+docker compose ps -a
 
 # Limpiar sistema Docker
 docker system prune -a

@@ -91,14 +91,19 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import sys; print('Container healthy'); sys.exit(0)" || exit 1
 
-# Comando por defecto para benchmark
+# Comando por defecto para ejecutar benchmarks manualmente
+# Este stage se usa para el servicio 'benchmark' en docker-compose
 CMD ["python", "benchmark_python.py"]
 
-# Stage 3: App stage (para FastAPI standalone)
+# Stage 3: App stage (para FastAPI activo permanentemente)
 FROM runtime as app-stage
 
 # Copiar solo la aplicación FastAPI
 COPY --chown=benchuser:benchuser ./app ./app
 
-# Comando para ejecutar FastAPI
+# Health check específico para FastAPI
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Comando para ejecutar FastAPI permanentemente
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

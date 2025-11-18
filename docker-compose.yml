@@ -1,15 +1,16 @@
 version: '3.8'
 
 services:
-  # Servicio principal de benchmarking
-  benchmark:
+  # Servicio principal: FastAPI activo permanentemente
+  fastapi-app:
     build:
       context: .
       dockerfile: Dockerfile
+      target: app-stage
       args:
         - PYTHON_VERSION=3.11
-    container_name: fastapi-benchmark
-    restart: "no"  # No reiniciar automáticamente, solo ejecución manual
+    container_name: fastapi-benchmark-app
+    restart: unless-stopped  # Reiniciar automáticamente si falla
     
     # Variables de entorno
     environment:
@@ -19,6 +20,10 @@ services:
       - BENCHMARK_ENV=docker
       - TZ=America/Mexico_City
     
+    # Exponer puerto para acceder a la API
+    ports:
+      - "8000:8000"
+    
     # Volúmenes para persistir logs y resultados
     volumes:
       - ./.logs:/app/.logs:rw
@@ -26,6 +31,7 @@ services:
       - ./benchmark_results_improved:/app/benchmark_results_improved:rw
       - ./resultados_nuevos:/app/resultados_nuevos:rw
       - ./resultados_vps:/app/resultados_vps:rw
+      - ./app:/app/app:rw  # Hot reload para desarrollo
     
     # Configuración de red
     networks:
@@ -43,7 +49,7 @@ services:
     
     # Healthcheck para monitoreo
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -56,42 +62,49 @@ services:
         max-size: "10m"
         max-file: "3"
     
-    # Comando por defecto
-    command: ["python", "benchmark_python.py"]
+    # Comando por defecto: ejecutar FastAPI con Uvicorn
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     
     # Configuración adicional
     stdin_open: true
     tty: true
 
-  # Servicio opcional para FastAPI de prueba local (descomentada si necesitas)
-  # fastapi-app:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #     target: app-stage
-  #   container_name: fastapi-test-app
-  #   restart: unless-stopped
-  #   
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - LOG_LEVEL=INFO
-  #   
-  #   ports:
-  #     - "8000:8000"
-  #   
-  #   networks:
-  #     - benchmark-network
-  #   
-  #   volumes:
-  #     - ./.logs:/app/.logs:rw
-  #   
-  #   command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-  #   
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
+  # Servicio para ejecutar benchmarks manualmente
+  benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.11
+    container_name: fastapi-benchmark-runner
+    restart: "no"  # No reiniciar, solo ejecución manual
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - LOG_LEVEL=INFO
+      - BENCHMARK_ENV=docker
+      - TZ=America/Mexico_City
+    
+    volumes:
+      - ./.logs:/app/.logs:rw
+      - ./benchmark_results:/app/benchmark_results:rw
+      - ./benchmark_results_improved:/app/benchmark_results_improved:rw
+      - ./resultados_nuevos:/app/resultados_nuevos:rw
+      - ./resultados_vps:/app/resultados_vps:rw
+    
+    networks:
+      - benchmark-network
+    
+    # Depende de que fastapi-app esté corriendo
+    depends_on:
+      - fastapi-app
+    
+    # Comando por defecto: ejecutar benchmark
+    command: ["python", "benchmark_python.py"]
+    
+    profiles:
+      - tools  # Solo se ejecuta con: docker compose --profile tools run benchmark
 
   # Servicio para análisis de logs (ejecutar manualmente)
   log-analyzer:
