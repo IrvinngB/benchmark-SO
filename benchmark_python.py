@@ -380,6 +380,239 @@ class AsyncBenchmarkEngine:
                     "total_response_size": total_response_size
                 }
 
+    async def benchmark_single_endpoint(self, endpoint: Dict, environment: Dict, test_num: int) -> BenchmarkResult:
+        """Ejecuta benchmark en un endpoint específico"""
+        log_manager = get_log_manager()
+        server_addr = self.config.servers[environment["name"]]
+        url = f"http://{server_addr}{endpoint['path']}"
+        num_requests = endpoint.get('requests', self.config.default_requests)
+        
+        start_time = time.perf_counter()
+        benchmark_start = datetime.now()
+        
+        latencies = []
+        successes = 0
+        failures = 0
+        total_bytes = 0
+        
+        net_start = psutil.net_io_counters()
+        
+        tasks = [self.single_request(url) for _ in range(num_requests)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        end_time = time.perf_counter()
+        benchmark_end = datetime.now()
+        
+        for result in results:
+            if isinstance(result, Exception):
+                failures += 1
+                continue
+            success, latency_ms, response_size = result
+            if success:
+                successes += 1
+                latencies.append(latency_ms)
+                total_bytes += response_size
+            else:
+                failures += 1
+        
+        net_end = psutil.net_io_counters()
+        
+        total_time = end_time - start_time
+        
+        if not latencies:
+            latencies = [0]
+        
+        latencies_sorted = sorted(latencies)
+        
+        metrics = self.monitor.get_metrics_during_period(benchmark_start, benchmark_end)
+        avg_cpu = statistics.mean([m.cpu_percent for m in metrics]) if metrics else 0
+        avg_memory = statistics.mean([m.memory_mb for m in metrics]) if metrics else 0
+        avg_proc_cpu = statistics.mean([m.process_cpu_percent for m in metrics]) if metrics else 0
+        avg_proc_mem = statistics.mean([m.process_memory_mb for m in metrics]) if metrics else 0
+        
+        jitter = statistics.stdev(latencies) if len(latencies) > 1 else 0
+        
+        result = BenchmarkResult(
+            timestamp=datetime.now().isoformat(),
+            test_number=test_num,
+            environment=environment["label"],
+            endpoint_name=endpoint["name"],
+            url=url,
+            requests_per_second=num_requests / total_time if total_time > 0 else 0,
+            avg_latency_ms=statistics.mean(latencies),
+            min_latency_ms=min(latencies),
+            max_latency_ms=max(latencies),
+            p50_latency_ms=latencies_sorted[len(latencies_sorted) // 2],
+            p95_latency_ms=latencies_sorted[int(len(latencies_sorted) * 0.95)],
+            p99_latency_ms=latencies_sorted[int(len(latencies_sorted) * 0.99)],
+            total_requests=num_requests,
+            successful_requests=successes,
+            failed_requests=failures,
+            error_rate=(failures / num_requests * 100) if num_requests > 0 else 0,
+            total_time_seconds=total_time,
+            throughput_mbps=(total_bytes * 8 / total_time / 1_000_000) if total_time > 0 else 0,
+            cpu_usage_percent=avg_cpu,
+            memory_usage_mb=avg_memory,
+            network_bytes_sent=net_end.bytes_sent - net_start.bytes_sent,
+            network_bytes_recv=net_end.bytes_recv - net_start.bytes_recv,
+            process_cpu_percent=avg_proc_cpu,
+            process_memory_mb=avg_proc_mem,
+            jitter_ms=jitter
+        )
+        
+        return result
+# FUNCIÓN PRINCIPAL DE BENCHMARK
+# ============================================================================
+
+async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[BenchmarkResult]:
+    """Ejecuta el benchmark completo"""
+    log_manager = get_log_manager()
+    all_results = []
+    
+    async with AsyncBenchmarkEngine(config) as engine:
+        engine.monitor.start_monitoring()
+        
+        log_manager.log_info("Iniciando benchmarks", category="general")
+        
+        for env in config.environments:
+            log_manager.log_info(f"Probando entorno: {env['label']}", category="general")
+            
+            if not await engine.test_connectivity(env):
+                log_manager.log_error(f"No se pudo conectar al entorno: {env['label']}", exc_info=False)
+                continue
+            
+            for test_num in range(1, config.num_tests + 1):
+                log_manager.log_info(f"Ejecutando prueba {test_num}/{config.num_tests}", category="general")
+                
+                for endpoint in config.endpoints:
+                    try:
+                        result = await engine.benchmark_single_endpoint(endpoint, env, test_num)
+                        all_results.append(result)
+                        
+                        log_manager.log_endpoint_result(asdict(result))
+                        
+                        if verbose:
+                            engine.console.print(
+                                f"   {result.endpoint_name}: "
+                                f"{result.requests_per_second:.2f} RPS, "
+                                f"{result.avg_latency_ms:.2f}ms latency"
+                            )
+                    except Exception as e:
+                        log_manager.log_error(f"Error en endpoint {endpoint['name']}: {str(e)}", exc_info=True)
+                        engine.console.print(f"[red] Error en {endpoint['name']}: {e}[/red]")
+        
+        engine.monitor.stop_monitoring()
+        log_manager.log_info("Benchmark completado", category="general")
+    
+    return all_results
+
+# ============================================================================
+# ANALIZADOR DE RESULTADOS
+# ============================================================================
+
+class BenchmarkAnalyzer:
+    """Analiza y visualiza resultados de benchmarks"""
+    
+    def __init__(self, results_dir: str):
+        self.results_dir = Path(results_dir)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.console = Console()
+    
+    def save_results(self, results: List[BenchmarkResult], timestamp: str) -> pd.DataFrame:
+        """Guarda resultados en múltiples formatos"""
+        df = pd.DataFrame([asdict(r) for r in results])
+        
+        csv_path = self.results_dir / f"benchmark_detailed_{timestamp}.csv"
+        df.to_csv(csv_path, index=False)
+        
+        json_path = self.results_dir / f"benchmark_detailed_{timestamp}.json"
+        df.to_json(json_path, orient='records', indent=2)
+        
+        excel_path = self.results_dir / f"benchmark_detailed_{timestamp}.xlsx"
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Resultados', index=False)
+            
+            summary = df.groupby('endpoint_name').agg({
+                'requests_per_second': ['mean', 'min', 'max', 'std'],
+                'avg_latency_ms': ['mean', 'min', 'max', 'std'],
+                'error_rate': 'mean'
+            }).round(2)
+            summary.to_excel(writer, sheet_name='Resumen')
+        
+        self.console.print(f"[green] Resultados guardados en {self.results_dir}/[/green]")
+        return df
+    
+    def create_visualizations(self, df: pd.DataFrame, timestamp: str):
+        """Crea visualizaciones de los resultados"""
+        viz_dir = self.results_dir / f"visualizations_{timestamp}"
+        viz_dir.mkdir(exist_ok=True)
+        
+        sns.set_style("whitegrid")
+        
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        
+        df.groupby('endpoint_name')['requests_per_second'].mean().plot(
+            kind='bar', ax=axes[0, 0], color='steelblue'
+        )
+        axes[0, 0].set_title('RPS Promedio por Endpoint')
+        axes[0, 0].set_ylabel('Requests/segundo')
+        axes[0, 0].tick_params(axis='x', rotation=45)
+        
+        df.groupby('endpoint_name')['avg_latency_ms'].mean().plot(
+            kind='bar', ax=axes[0, 1], color='coral'
+        )
+        axes[0, 1].set_title('Latencia Promedio por Endpoint')
+        axes[0, 1].set_ylabel('Latencia (ms)')
+        axes[0, 1].tick_params(axis='x', rotation=45)
+        
+        df.groupby('endpoint_name')['error_rate'].mean().plot(
+            kind='bar', ax=axes[1, 0], color='crimson'
+        )
+        axes[1, 0].set_title('Tasa de Error por Endpoint')
+        axes[1, 0].set_ylabel('Error Rate (%)')
+        axes[1, 0].tick_params(axis='x', rotation=45)
+        
+        df.groupby('endpoint_name')['cpu_usage_percent'].mean().plot(
+            kind='bar', ax=axes[1, 1], color='green'
+        )
+        axes[1, 1].set_title('Uso de CPU por Endpoint')
+        axes[1, 1].set_ylabel('CPU (%)')
+        axes[1, 1].tick_params(axis='x', rotation=45)
+        
+        plt.tight_layout()
+        plt.savefig(viz_dir / 'benchmark_summary.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        self.console.print(f"[green] Visualizaciones guardadas en {viz_dir}/[/green]")
+    
+    def generate_report(self, df: pd.DataFrame, timestamp: str) -> str:
+        """Genera reporte en Markdown"""
+        report_path = self.results_dir / f"benchmark_report_{timestamp}.md"
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(f"# Reporte de Benchmark - {timestamp}\n\n")
+            f.write(f"## Resumen General\n\n")
+            f.write(f"- **Total de pruebas**: {len(df)}\n")
+            f.write(f"- **Endpoints evaluados**: {df['endpoint_name'].nunique()}\n")
+            f.write(f"- **RPS promedio**: {df['requests_per_second'].mean():.2f}\n")
+            f.write(f"- **Latencia promedio**: {df['avg_latency_ms'].mean():.2f}ms\n")
+            f.write(f"- **Tasa de error promedio**: {df['error_rate'].mean():.2f}%\n\n")
+            
+            f.write(f"## Resultados por Endpoint\n\n")
+            for endpoint in df['endpoint_name'].unique():
+                endpoint_df = df[df['endpoint_name'] == endpoint]
+                f.write(f"### {endpoint}\n\n")
+                f.write(f"- RPS: {endpoint_df['requests_per_second'].mean():.2f} "
+                       f"(min: {endpoint_df['requests_per_second'].min():.2f}, "
+                       f"max: {endpoint_df['requests_per_second'].max():.2f})\n")
+                f.write(f"- Latencia: {endpoint_df['avg_latency_ms'].mean():.2f}ms "
+                       f"(min: {endpoint_df['min_latency_ms'].mean():.2f}ms, "
+                       f"max: {endpoint_df['max_latency_ms'].mean():.2f}ms)\n")
+                f.write(f"- Error rate: {endpoint_df['error_rate'].mean():.2f}%\n\n")
+        
+        self.console.print(f"[green] Reporte generado: {report_path}[/green]")
+        return str(report_path)
+
 def create_live_dashboard():
     """Crea dashboard web opcional con Flask (ejecutar en hilo separado)"""
     try:
@@ -402,12 +635,11 @@ def create_live_dashboard():
                 </style>
             </head>
             <body>
-                <h1>🚀 FastAPI Benchmark Dashboard</h1>
+                <h1> FastAPI Benchmark Dashboard</h1>
                 <div id="metrics"></div>
                 <div id="chart" style="width:100%; height:400px;"></div>
                 
                 <script>
-                    // Actualizar métricas cada 2 segundos
                     setInterval(function() {
                         fetch('/api/metrics')
                         .then(response => response.json())
@@ -425,11 +657,10 @@ def create_live_dashboard():
         
         @app.route('/api/metrics')
         def api_metrics():
-            # En una implementación real, esto vendría de las métricas actuales
             return jsonify({
                 'cpu': psutil.cpu_percent(),
                 'memory': round(psutil.virtual_memory().used / (1024*1024)),
-                'tests_completed': 0  # Actualizar con progreso real
+                'tests_completed': 0
             })
         
         app.run(host='0.0.0.0', port=5000, debug=False)
