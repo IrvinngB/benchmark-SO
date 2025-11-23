@@ -51,6 +51,74 @@ from logging_manager import get_log_manager
 # ============================================================================
 # CONFIGURACIÓN
 # ============================================================================
+
+#!/usr/bin/env python3
+"""
+FastAPI Performance Benchmark - Python Edition
+==============================================
+Script avanzado de benchmarking con monitoreo en tiempo real de recursos,
+visualización de datos, y análisis estadístico detallado.
+
+Features:
+- Monitoreo en tiempo real de CPU/RAM
+- Benchmarking concurrente con asyncio/aiohttp
+- Visualización de métricas en vivo
+- Análisis estadístico avanzado
+- Exportación a múltiples formatos
+- Dashboard web opcional con Flask
+
+Dependencias:
+pip install aiohttp asyncio psutil matplotlib pandas seaborn tqdm rich flask plotly
+"""
+
+import asyncio
+import aiohttp
+import time
+import json
+import csv
+import statistics
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import psutil
+import numpy as np
+from datetime import datetime, timedelta
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+import threading
+import queue
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Tuple
+import argparse
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, TaskID
+from rich.live import Live
+from rich.panel import Panel
+from rich import box
+import warnings
+warnings.filterwarnings('ignore')
+
+# Importar LogManager
+from logging_manager import get_log_manager
+
+# ============================================================================
+# CONFIGURACIÓN
+# ============================================================================
+
+@dataclass
+class BenchmarkConfig:
+    """Configuración del benchmark"""
+    num_tests: int = 10
+    default_requests: int = 500
+    default_connections: int = 100
+    timeout: int = 60
+    target_process_name: str = "uvicorn"  # Nombre del proceso a monitorear
+    results_dir: str = "resultados_nuevos"
+    
+    servers: Dict[str, str] = None
+    endpoints: List[Dict] = None
+    environments: List[Dict] = None
     
     def __post_init__(self):
         if self.servers is None:
@@ -67,79 +135,21 @@ from logging_manager import get_log_manager
                 {"name": "Large JSON Response", "path": "/json-large?page=1&limit=50", "requests": 1500}
             ]
         
+        if self.environments is None:
+            self.environments = [
+                {"name": "local_docker", "label": "Docker Local", "ip": "localhost"}
+            ]
 
-class AsyncBenchmarkEngine:
-    """Motor de benchmarking asíncrono con aiohttp"""
-    
-    def __init__(self, config: BenchmarkConfig):
-        self.config = config
-        self.console = Console()
-        self.monitor = SystemMonitor()
-        self.session: Optional[aiohttp.ClientSession] = None
-        
-    async def __aenter__(self):
-        # Configurar la sesión HTTP con optimizaciones
-        connector = aiohttp.TCPConnector(
-            limit=200,  # Pool de conexiones
-            limit_per_host=100,
-            ttl_dns_cache=300,
-            use_dns_cache=True,
-        )
-        
-        timeout = aiohttp.ClientTimeout(total=self.config.timeout)
-        
-        self.session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-            headers={'User-Agent': 'FastAPI-Benchmark-Python/1.0'}
-        )
-        
-        return self
-        
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.session:
-            await self.session.close()
-    
-    async def test_connectivity(self, environment: Dict[str, str]) -> bool:
-        """Verifica la conectividad con el servidor"""
-        server_addr = self.config.servers[environment["name"]]
-        health_url = f"http://{server_addr}/health"
-        log_manager = get_log_manager()
-        
-        try:
-            start_time = time.perf_counter()
-            async with self.session.get(health_url) as response:
-                end_time = time.perf_counter()
-                response_time_ms = (end_time - start_time) * 1000
-                
-                if response.status == 200:
-                    self.console.print(f"[green]✅ Servidor accesible: {health_url}[/green]")
-                    log_manager.log_connectivity_test(environment["name"], health_url, True, response_time_ms)
-                    return True
-                else:
-                    self.console.print(f"[red]❌ Servidor responde con código {response.status}[/red]")
-                    log_manager.log_connectivity_test(environment["name"], health_url, False, response_time_ms)
-                    return False
-        except Exception as e:
-            self.console.print(f"[red]❌ Error de conectividad: {e}[/red]")
-            log_manager.log_connectivity_test(environment["name"], health_url, False)
-            log_manager.log_error(f"Error de conectividad en {health_url}: {str(e)}", exc_info=False)
-            return False
-    
-    async def single_request(self, url: str) -> Tuple[bool, float, int]:
-        """Realiza una request individual y mide latencia"""
-        log_manager = get_log_manager()
-        start_time = time.perf_counter()
-        try:
-            async with self.session.get(url) as response:
-                content = await response.read()
-                end_time = time.perf_counter()
-                
-                latency_ms = (end_time - start_time) * 1000
-                response_size = len(content)
-                success = 200 <= response.status < 400
-                
-
+@dataclass
+class BenchmarkResult:
+    """Resultado de una prueba individual"""
+    timestamp: str
+    test_number: int
+    environment: str
+    endpoint_name: str
+    url: str
+    requests_per_second: float
+    avg_latency_ms: float
 class BenchmarkUI:
     """Interfaz de usuario con Rich para visualización en tiempo real"""
     
@@ -220,6 +230,21 @@ async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[B
             
             for env in config.environments:
                 # Verificar conectividad
+                if not await engine.test_connectivity(env):
+                    engine.console.print(f"[red]❌ Saltando entorno {env['name']} por falta de conectividad[/red]")
+                    log_manager.log_warning(f"Entorno {env['name']} omitido por falta de conectividad")
+                    continue
+                
+                # Registrar inicio de entorno
+                log_manager.log_info(f"Iniciando benchmarks para entorno: {env['label']}")
+                engine.console.print(f"\n[bold blue]🌍 Ejecutando benchmarks para {env['label']}[/bold blue]")
+                
+                # Ejecutar múltiples runs
+                for test_num in range(1, config.num_tests + 1):
+                    engine.console.print(f"\n[yellow]📍 Ejecución {test_num}/{config.num_tests}[/yellow]")
+                    log_manager.log_info(f"Ejecutando test {test_num}/{config.num_tests}")
+                    
+                    # Crear tareas para todos los endpoints del run actual
                     tasks = []
                     for endpoint in config.endpoints:
                         task = asyncio.create_task(
