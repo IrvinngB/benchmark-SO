@@ -150,100 +150,226 @@ class BenchmarkResult:
     url: str
     requests_per_second: float
     avg_latency_ms: float
-class BenchmarkUI:
-    """Interfaz de usuario con Rich para visualización en tiempo real"""
+    min_latency_ms: float
+    max_latency_ms: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    p99_latency_ms: float
+    total_requests: int
+    successful_requests: int
+    failed_requests: int
+    error_rate: float
+    total_time_seconds: float
+    throughput_mbps: float
+    cpu_usage_percent: float
+    memory_usage_mb: float
+    network_bytes_sent: int
+    network_bytes_recv: int
+    process_cpu_percent: float = 0.0
+    process_memory_mb: float = 0.0
+    jitter_ms: float = 0.0
+
+@dataclass
+class SystemMetrics:
+    """Métricas del sistema durante el benchmark"""
+    timestamp: datetime
+    cpu_percent: float
+    memory_percent: float
+    memory_mb: float
+    network_sent: int
+    network_recv: int
+    disk_io_read: int
+    disk_io_write: int
+    process_cpu_percent: float = 0.0
+    process_memory_mb: float = 0.0
+
+# ============================================================================
+# MONITOR DE RECURSOS
+# ============================================================================
+
+class SystemMonitor:
+    """Monitor de recursos del sistema en tiempo real"""
     
-    def __init__(self):
+    def __init__(self, target_process_name: str = "uvicorn"):
         self.console = Console()
+        self.metrics_queue = queue.Queue()
+        self.monitoring = False
+        self.metrics_history = []
+        self.target_process_name = target_process_name
+        self.target_process = None
+        self._monitor_thread = None
+
+    def start_monitoring(self):
+        """Inicia el monitoreo en un hilo separado"""
+        self.monitoring = True
+        self.metrics_queue = queue.Queue()
+        self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._monitor_thread.start()
         
-    def show_header(self, config: BenchmarkConfig):
-        """Muestra el header del benchmark"""
-        self.console.print(Panel.fit(
-            "[bold cyan]🚀 FastAPI Performance Benchmark - Python Edition[/bold cyan]\n\n"
-            f"📊 Ejecutando {config.num_tests} pruebas en Docker Local\n"
-            f"🎯 Total de pruebas: {config.num_tests * len(config.endpoints)} (modo ALTO VOLUMEN)\n"
-            f"🐳 Entorno: Docker en localhost:8000\n"
-            f"⚡ Motor: AsyncIO + aiohttp\n"
-            f"📈 Monitoreo: CPU, RAM, Network en tiempo real",
-            title="Benchmark Configuration",
-            border_style="bright_blue"
-        ))
+    def stop_monitoring(self):
+        """Detiene el monitoreo"""
+        self.monitoring = False
+        if self._monitor_thread:
+            self._monitor_thread.join(timeout=2.0)
+            
+    def _find_process(self):
+        """Intenta encontrar el proceso objetivo"""
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                # Buscar por nombre o línea de comando
+                if self.target_process_name in proc.info['name'] or \
+                   (proc.info['cmdline'] and any(self.target_process_name in arg for arg in proc.info['cmdline'])):
+                    self.target_process = proc
+                    # self.console.print(f"[green]✅ Proceso encontrado: {proc.info['name']} (PID: {proc.info['pid']})[/green]")
+                    return
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+
+    def _monitor_loop(self):
+        """Loop principal del monitoreo"""
+        log_manager = get_log_manager()  # Obtener instancia del LogManager
+        while self.monitoring:
+            try:
+                # Obtener métricas del sistema global
+                cpu_percent = psutil.cpu_percent(interval=0.5)
+                memory = psutil.virtual_memory()
+                network = psutil.net_io_counters()
+                disk = psutil.disk_io_counters()
+                
+                # Métricas del proceso específico
+                proc_cpu = 0.0
+                proc_mem = 0.0
+                
+                if self.target_process:
+                    try:
+                        with self.target_process.oneshot():
+                            proc_cpu = self.target_process.cpu_percent()
+                            proc_mem = self.target_process.memory_info().rss / (1024 * 1024)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        self.target_process = None  # Proceso perdido
+                        self._find_process() # Intentar encontrarlo de nuevo
+                else:
+                     self._find_process() # Intentar encontrarlo si no lo tenemos
+                
+                metrics = SystemMetrics(
+                    timestamp=datetime.now(),
+                    cpu_percent=cpu_percent,
+                    memory_percent=memory.percent,
+                    memory_mb=memory.used / (1024 * 1024),
+                    network_sent=network.bytes_sent,
+                    network_recv=network.bytes_recv,
+                    disk_io_read=disk.read_bytes if disk else 0,
+                    disk_io_write=disk.write_bytes if disk else 0,
+                    process_cpu_percent=proc_cpu,
+                    process_memory_mb=proc_mem
+                )
+                
+                self.metrics_queue.put(metrics)
+                self.metrics_history.append(metrics)
+                
+                # Log de métricas del sistema
+                log_msg = (
+                    f"CPU: {cpu_percent:.1f}% | RAM: {memory.used/(1024*1024):.1f}MB"
+                )
+                if self.target_process:
+                    log_msg += f" | Proc CPU: {proc_cpu:.1f}% | Proc RAM: {proc_mem:.1f}MB"
+                
+                log_manager.system_logger.debug(log_msg)
+                
+            except Exception as e:
+                # self.console.print(f"[red]Error en monitoreo: {e}[/red]")
+                pass
+                
+    def get_current_metrics(self) -> Optional[SystemMetrics]:
+        """Obtiene las métricas actuales"""
+        try:
+            return self.metrics_queue.get_nowait()
+        except queue.Empty:
+            return None
     
-    def create_progress_table(self) -> Table:
-        """Crea tabla de progreso en tiempo real"""
-        table = Table(title="Progreso del Benchmark", box=box.ROUNDED)
-        table.add_column("Entorno", style="cyan")
-        table.add_column("Endpoint", style="magenta")
-        table.add_column("Test", style="yellow")
-        table.add_column("RPS", style="green")
-        table.add_column("Latencia (ms)", style="blue")
-        table.add_column("CPU %", style="red")
-        table.add_column("Estado", style="bright_green")
+    def get_metrics_during_period(self, start_time: datetime, end_time: datetime) -> List[SystemMetrics]:
+        """Obtiene métricas durante un período específico"""
+        return [m for m in self.metrics_history 
+                if start_time <= m.timestamp <= end_time]
+
+# ============================================================================
+# BENCHMARK ENGINE
+# ============================================================================
+
+class AsyncBenchmarkEngine:
+    """Motor de benchmarking asíncrono con aiohttp"""
+    
+    def __init__(self, config: BenchmarkConfig):
+        self.config = config
+        self.console = Console()
+        self.monitor = SystemMonitor(target_process_name=config.target_process_name)
+        self.session: Optional[aiohttp.ClientSession] = None
         
-        return table
-    
-    def update_progress_table(self, table: Table, result: BenchmarkResult):
-        """Actualiza la tabla de progreso"""
-        table.add_row(
-            result.environment,
-            result.endpoint_name,
-            str(result.test_number),
-            f"{result.requests_per_second:.2f}",
-            f"{result.avg_latency_ms:.2f}",
-            f"{result.cpu_usage_percent:.1f}",
-            "✅" if result.error_rate < 1 else "⚠️"
+    async def __aenter__(self):
+        # Configurar la sesión HTTP con optimizaciones
+        connector = aiohttp.TCPConnector(
+            limit=200,  # Pool de conexiones
+            limit_per_host=100,
+            ttl_dns_cache=300,
+            use_dns_cache=True,
         )
-
-# ============================================================================
-# MAIN BENCHMARK RUNNER
-# ============================================================================
-
-async def run_benchmark(config: BenchmarkConfig, verbose: bool = True) -> List[BenchmarkResult]:
-    """Ejecuta el benchmark completo con logging integrado"""
+        
+        timeout = aiohttp.ClientTimeout(total=self.config.timeout)
+        
+        self.session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+            headers={'User-Agent': 'FastAPI-Benchmark-Python/1.0'}
+        )
+        
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
     
-    # Obtener instancia del LogManager
-    log_manager = get_log_manager()
-    
-    # Registrar inicio del benchmark
-    log_manager.log_benchmark_start(asdict(config) if hasattr(config, '__dict__') else config.__dict__)
-    
-    ui = BenchmarkUI()
-    analyzer = BenchmarkAnalyzer(config.results_dir)
-    
-    if verbose:
-        ui.show_header(config)
-    
-    all_results = []
-    benchmark_start_time = time.perf_counter()
-    
-    async with AsyncBenchmarkEngine(config) as engine:
-        # Iniciar monitoreo de sistema
-        engine.monitor.start_monitoring()
-        log_manager.log_info("Monitoreo de recursos iniciado", category="general")
+    async def test_connectivity(self, environment: Dict[str, str]) -> bool:
+        """Verifica la conectividad con el servidor"""
+        server_addr = self.config.servers[environment["name"]]
+        health_url = f"http://{server_addr}/health"
+        log_manager = get_log_manager()
         
         try:
-            # Crear semáforo para controlar concurrencia
-            semaphore = asyncio.Semaphore(config.default_connections)
-            
-            total_tests = config.num_tests * len(config.endpoints) * len(config.environments)
-            current_test = 0
-            
-            for env in config.environments:
-                # Verificar conectividad
-                if not await engine.test_connectivity(env):
-                    engine.console.print(f"[red]❌ Saltando entorno {env['name']} por falta de conectividad[/red]")
-                    log_manager.log_warning(f"Entorno {env['name']} omitido por falta de conectividad")
-                    continue
+            start_time = time.perf_counter()
+            async with self.session.get(health_url) as response:
+                end_time = time.perf_counter()
+                response_time_ms = (end_time - start_time) * 1000
                 
-                # Registrar inicio de entorno
-                log_manager.log_info(f"Iniciando benchmarks para entorno: {env['label']}")
-                engine.console.print(f"\n[bold blue]🌍 Ejecutando benchmarks para {env['label']}[/bold blue]")
+                if response.status == 200:
+                    self.console.print(f"[green]✅ Servidor accesible: {health_url}[/green]")
+                    log_manager.log_connectivity_test(environment["name"], health_url, True, response_time_ms)
+                    return True
+                else:
+                    self.console.print(f"[red]❌ Servidor responde con código {response.status}[/red]")
+                    log_manager.log_connectivity_test(environment["name"], health_url, False, response_time_ms)
+                    return False
+        except Exception as e:
+            self.console.print(f"[red]❌ Error de conectividad: {e}[/red]")
+            log_manager.log_connectivity_test(environment["name"], health_url, False)
+            log_manager.log_error(f"Error de conectividad en {health_url}: {str(e)}", exc_info=False)
+            return False
+    
+    async def single_request(self, url: str) -> Tuple[bool, float, int]:
+        """Realiza una request individual y mide latencia"""
+        log_manager = get_log_manager()
+        start_time = time.perf_counter()
+        try:
+            async with self.session.get(url) as response:
+                content = await response.read()
+                end_time = time.perf_counter()
                 
-                # Ejecutar múltiples runs
-                for test_num in range(1, config.num_tests + 1):
-                    engine.console.print(f"\n[yellow]📍 Ejecución {test_num}/{config.num_tests}[/yellow]")
-                    log_manager.log_info(f"Ejecutando test {test_num}/{config.num_tests}")
-                    
+                latency_ms = (end_time - start_time) * 1000
+                response_size = len(content)
+                success = 200 <= response.status < 400
+                
+                if not success:
+                    log_manager.log_warning(f"Request failed: {url} -> Status {response.status}")
+                
                     # Crear tareas para todos los endpoints del run actual
                     tasks = []
                     for endpoint in config.endpoints:
