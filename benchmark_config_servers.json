@@ -1,0 +1,60 @@
+{
+  "num_tests": 10,
+  "default_requests": 500,
+  "default_connections": 100,
+  "timeout": 60,
+  "results_dir": "resultados_automaticos",
+  "skip_connectivity_check": false,
+  "max_retries": 3,
+  "retry_delay_seconds": 60,
+  "description": "Configuración para benchmarking automático de servidores remotos",
+  "servers": {
+    "server_1": "143.110.201.94:8000",
+    "server_2": "104.248.217.252:8000",
+    "server_3": "206.189.215.59:8000"
+  },
+  "environments": [
+    {
+      "name": "server_1",
+      "label": "Server 1 (143.110.201.94)",
+      "ip": "143.110.201.94"
+    },
+    {
+      "name": "server_2",
+      "label": "Server 2 (104.248.217.252)",
+      "ip": "104.248.217.252"
+    },
+    {
+      "name": "server_3",
+      "label": "Server 3 (206.189.215.59)",
+      "ip": "206.189.215.59"
+    }
+  ],
+  "endpoints": [
+    {
+      "name": "Root Endpoint (Baseline)",
+      "path": "/",
+      "requests": 500
+    },
+    {
+      "name": "Health Check",
+      "path": "/health",
+      "requests": 500
+    },
+    {
+      "name": "Async Light",
+      "path": "/async-light",
+      "requests": 750
+    },
+    {
+      "name": "Heavy Computation",
+      "path": "/heavy",
+      "requests": 2000
+    },
+    {
+      "name": "Large JSON Response",
+      "path": "/json-large?page=1&limit=50",
+      "requests": 1500
+    }
+  ]
+}

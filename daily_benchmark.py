@@ -54,7 +54,7 @@ class DailyBenchmarkRunner:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     file_config = json.load(f)
                     config.update(file_config)
-                self.log_manager.log_info(f"Configuración cargada desde: {self.config_file}", category="config")
+                self.log_manager.log_info(f"Configuración cargada desde: {self.config_file}", category="general")
             except Exception as e:
                 self.log_manager.log_warning(f"Error cargando configuración desde archivo: {e}. Usando defaults.")
         
@@ -62,13 +62,25 @@ class DailyBenchmarkRunner:
     
     def create_benchmark_config(self, config_dict: dict) -> BenchmarkConfig:
         """Crear objeto BenchmarkConfig"""
-        return BenchmarkConfig(
+        benchmark_config = BenchmarkConfig(
             num_tests=config_dict['num_tests'],
             default_requests=config_dict['default_requests'],
             default_connections=config_dict['default_connections'],
             timeout=config_dict['timeout'],
             results_dir=config_dict['results_dir']
         )
+        
+        # Cargar servers, environments y endpoints si están en el config
+        if 'servers' in config_dict:
+            benchmark_config.servers = config_dict['servers']
+        
+        if 'environments' in config_dict:
+            benchmark_config.environments = config_dict['environments']
+        
+        if 'endpoints' in config_dict:
+            benchmark_config.endpoints = config_dict['endpoints']
+        
+        return benchmark_config
     
     def save_daily_config(self, config_dict: dict):
         """Guardar configuración usada para el día"""
@@ -83,7 +95,7 @@ class DailyBenchmarkRunner:
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(config_to_save, f, indent=2, ensure_ascii=False)
             
-            self.log_manager.log_info(f"Configuración del día guardada: {config_file}", category="config")
+            self.log_manager.log_info(f"Configuración del día guardada: {config_file}", category="general")
         except Exception as e:
             self.log_manager.log_warning(f"Error guardando configuración diaria: {e}")
     
@@ -250,6 +262,21 @@ def create_default_config_file():
         json.dump(config, f, indent=2, ensure_ascii=False)
     
     print("✅ Archivo de configuración por defecto creado: daily_config_default.json")
+
+
+def log_summary(self, summary: dict):
+    """Registrar resumen completo de ejecución"""
+    self.benchmark_logger.info("=" * 80)
+    self.benchmark_logger.info("📊 RESUMEN DE EJECUCIÓN")
+    self.benchmark_logger.info("=" * 80)
+    
+    for key, value in summary.items():
+        if isinstance(value, (list, dict)):
+            self.benchmark_logger.info(f"{key}: {json.dumps(value, indent=2)}")
+        else:
+            self.benchmark_logger.info(f"{key}: {value}")
+    
+    self.benchmark_logger.info("=" * 80)
 
 
 async def main():

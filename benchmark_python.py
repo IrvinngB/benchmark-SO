@@ -79,42 +79,6 @@ class BenchmarkConfig:
                 {"name": "Heavy Computation", "path": "/heavy", "requests": 2000},
                 {"name": "Large JSON Response", "path": "/json-large?page=1&limit=50", "requests": 1500}
             ]
-        
-        if self.environments is None:
-            self.environments = [
-                {"name": "local_docker", "label": "Docker Local", "ip": "localhost"}
-            ]
-
-@dataclass
-class BenchmarkResult:
-    """Resultado de una prueba individual"""
-    timestamp: str
-    test_number: int
-    environment: str
-    endpoint_name: str
-    url: str
-    requests_per_second: float
-    avg_latency_ms: float
-    min_latency_ms: float
-    max_latency_ms: float
-    p50_latency_ms: float
-    p95_latency_ms: float
-    p99_latency_ms: float
-    total_requests: int
-    successful_requests: int
-    failed_requests: int
-    error_rate: float
-    total_time_seconds: float
-    throughput_mbps: float
-    cpu_usage_percent: float
-    memory_usage_mb: float
-    network_bytes_sent: int
-    network_bytes_recv: int
-
-@dataclass
-class SystemMetrics:
-    """Métricas del sistema durante el benchmark"""
-    timestamp: datetime
     cpu_percent: float
     memory_percent: float
     memory_mb: float

@@ -1,6 +1,8 @@
 import logging
 import asyncio
 import math
+import psutil
+from datetime import datetime
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
@@ -44,6 +46,80 @@ async def health_check():
         "status": "healthy",
         "service": "fastapi-performance-test"
     }
+
+
+@app.get("/metrics")
+async def system_metrics():
+    """
+    Endpoint de métricas del sistema.
+    Retorna información en tiempo real sobre CPU, RAM, disco y red del servidor.
+    
+    Útil para monitoreo durante benchmarks para obtener métricas del servidor remoto.
+    """
+    logger.info("System metrics requested")
+    
+    try:
+        # CPU metrics
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        cpu_count = psutil.cpu_count()
+        cpu_per_core = psutil.cpu_percent(interval=0.1, percpu=True)
+        
+        # Memory metrics
+        memory = psutil.virtual_memory()
+        memory_mb_total = memory.total / (1024 * 1024)
+        memory_mb_used = memory.used / (1024 * 1024)
+        memory_mb_available = memory.available / (1024 * 1024)
+        
+        # Disk metrics
+        disk = psutil.disk_usage('/')
+        disk_gb_total = disk.total / (1024 * 1024 * 1024)
+        disk_gb_used = disk.used / (1024 * 1024 * 1024)
+        disk_gb_free = disk.free / (1024 * 1024 * 1024)
+        
+        # Network metrics
+        network = psutil.net_io_counters()
+        
+        # System uptime (aproximado desde boot time)
+        boot_time = datetime.fromtimestamp(psutil.boot_time())
+        uptime_seconds = (datetime.now() - boot_time).total_seconds()
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "cpu": {
+                "percent": round(cpu_percent, 2),
+                "count": cpu_count,
+                "per_cpu": [round(p, 2) for p in cpu_per_core] if cpu_per_core else []
+            },
+            "memory": {
+                "total_mb": round(memory_mb_total, 2),
+                "used_mb": round(memory_mb_used, 2),
+                "available_mb": round(memory_mb_available, 2),
+                "percent": round(memory.percent, 2)
+            },
+            "disk": {
+                "total_gb": round(disk_gb_total, 2),
+                "used_gb": round(disk_gb_used, 2),
+                "free_gb": round(disk_gb_free, 2),
+                "percent": round(disk.percent, 2)
+            },
+            "network": {
+                "bytes_sent": network.bytes_sent,
+                "bytes_recv": network.bytes_recv,
+                "packets_sent": network.packets_sent,
+                "packets_recv": network.packets_recv
+            },
+            "uptime_seconds": round(uptime_seconds, 2)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting system metrics: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Failed to retrieve system metrics",
+                "detail": str(e)
+            }
+        )
 
 
 @app.get("/heavy")
@@ -198,7 +274,7 @@ async def json_large_full():
 async def startup_event():
     """Evento ejecutado al iniciar la aplicación."""
     logger.info("FastAPI Performance Testing API is starting up...")
-    logger.info("Available endpoints: /, /health, /heavy, /async-light, /json-large")
+    logger.info("Available endpoints: /, /health, /metrics, /heavy, /async-light, /json-large")
 
 
 @app.on_event("shutdown")
