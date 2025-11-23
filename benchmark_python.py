@@ -52,60 +52,6 @@ from logging_manager import get_log_manager
 # CONFIGURACIÓN
 # ============================================================================
 
-#!/usr/bin/env python3
-"""
-FastAPI Performance Benchmark - Python Edition
-==============================================
-Script avanzado de benchmarking con monitoreo en tiempo real de recursos,
-visualización de datos, y análisis estadístico detallado.
-
-Features:
-- Monitoreo en tiempo real de CPU/RAM
-- Benchmarking concurrente con asyncio/aiohttp
-- Visualización de métricas en vivo
-- Análisis estadístico avanzado
-- Exportación a múltiples formatos
-- Dashboard web opcional con Flask
-
-Dependencias:
-pip install aiohttp asyncio psutil matplotlib pandas seaborn tqdm rich flask plotly
-"""
-
-import asyncio
-import aiohttp
-import time
-import json
-import csv
-import statistics
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import psutil
-import numpy as np
-from datetime import datetime, timedelta
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
-import threading
-import queue
-from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Tuple
-import argparse
-from rich.console import Console
-from rich.table import Table
-from rich.progress import Progress, TaskID
-from rich.live import Live
-from rich.panel import Panel
-from rich import box
-import warnings
-warnings.filterwarnings('ignore')
-
-# Importar LogManager
-from logging_manager import get_log_manager
-
-# ============================================================================
-# CONFIGURACIÓN
-# ============================================================================
-
 @dataclass
 class BenchmarkConfig:
     """Configuración del benchmark"""
@@ -370,58 +316,69 @@ class AsyncBenchmarkEngine:
                 if not success:
                     log_manager.log_warning(f"Request failed: {url} -> Status {response.status}")
                 
-                    # Crear tareas para todos los endpoints del run actual
-                    tasks = []
-                    for endpoint in config.endpoints:
-                        task = asyncio.create_task(
-                            engine.benchmark_endpoint(endpoint, env, test_num, semaphore)
-                        )
-                        tasks.append(task)
-                    
-                    # Ejecutar todos los endpoints del run concurrentemente
-                    with engine.console.status(f"[bold green]Ejecutando prueba {test_num}..."):
-                        results = await asyncio.gather(*tasks, return_exceptions=True)
-                    
-                    # Procesar resultados
-                    for result in results:
-                        if isinstance(result, Exception):
-                            error_msg = f"Error en benchmark: {str(result)}"
-                            engine.console.print(f"[red]{error_msg}[/red]")
-                            log_manager.log_error(error_msg, exc_info=False)
-                        else:
-                            all_results.append(result)
-                            current_test += 1
-                            
-                            # Registrar resultado del endpoint
-                            log_manager.log_endpoint_result(asdict(result))
-                            
-                            if verbose:
-                                progress = (current_test / total_tests) * 100
-                                engine.console.print(
-                                    f"   ✅ [{progress:5.1f}%] {result.endpoint_name}: "
-                                    f"{result.requests_per_second:.2f} RPS, "
-                                    f"{result.avg_latency_ms:.2f}ms latency"
-                                )
+                return success, latency_ms, response_size
                 
-                # Registrar fin de entorno
-                log_manager.log_info(f"Completados benchmarks para entorno: {env['label']}")
-        
         except Exception as e:
-            log_manager.log_error(f"Error crítico en benchmark: {str(e)}", exc_info=True)
-            engine.console.print(f"[red]❌ Error crítico durante ejecución: {e}[/red]")
-            raise
+            end_time = time.perf_counter()
+            latency_ms = (end_time - start_time) * 1000
+            log_manager.log_error(f"Request error: {url} -> {str(e)}", exc_info=False)
+            return False, latency_ms, 0
+
+    async def benchmark_endpoint(self, endpoint: str, env: Dict[str, str], test_num: int, semaphore: asyncio.Semaphore):
+        """Realiza un benchmark en un endpoint específico"""
+        # Iniciar monitoreo de recursos
+        self.monitor.start_monitoring()
         
-        finally:
-            # Detener monitoreo
-            engine.monitor.stop_monitoring()
-            log_manager.log_info("Monitoreo de recursos detenido", category="general")
-    
-    # Registrar fin del benchmark y guardar resumen
-    benchmark_end_time = time.perf_counter()
-    total_time = benchmark_end_time - benchmark_start_time
-    log_manager.log_benchmark_end(total_time, len(all_results))
-    
-    return all_results
+        # Crear tarea para el endpoint actual
+        task = asyncio.create_task(
+            self._benchmark_endpoint_task(endpoint, env, test_num, semaphore)
+        )
+        
+        # Ejecutar la tarea y esperar su finalización
+        result = await task
+        
+        # Detener monitoreo
+        self.monitor.stop_monitoring()
+        
+        return result
+
+    async def _benchmark_endpoint_task(self, endpoint: str, env: Dict[str, str], test_num: int, semaphore: asyncio.Semaphore):
+        """Tarea para benchmark de un endpoint"""
+        log_manager = get_log_manager()
+        url = f"http://{self.config.servers[env['name']]}{endpoint}"
+        num_requests = self.config.endpoints[endpoint].requests
+        
+        async with semaphore:
+            async with self.console.status(f"[bold green]Ejecutando prueba {test_num} en {endpoint}..."):
+                start_time = time.perf_counter()
+                results = await asyncio.gather(*[self.single_request(url) for _ in range(num_requests)])
+                end_time = time.perf_counter()
+                
+                # Procesar resultados
+                success_count = sum(1 for success, _, _ in results if success)
+                total_latency_ms = sum(latency for _, latency, _ in results)
+                total_response_size = sum(size for _, _, size in results)
+                
+                avg_latency_ms = total_latency_ms / num_requests
+                requests_per_second = num_requests / (end_time - start_time)
+                error_rate = (1 - success_count / num_requests) * 100
+                
+                # Registrar resultado del endpoint
+                log_manager.log_endpoint_result({
+                    "endpoint_name": endpoint,
+                    "requests_per_second": requests_per_second,
+                    "avg_latency_ms": avg_latency_ms,
+                    "error_rate": error_rate,
+                    "total_response_size": total_response_size
+                })
+                
+                return {
+                    "endpoint_name": endpoint,
+                    "requests_per_second": requests_per_second,
+                    "avg_latency_ms": avg_latency_ms,
+                    "error_rate": error_rate,
+                    "total_response_size": total_response_size
+                }
 
 def create_live_dashboard():
     """Crea dashboard web opcional con Flask (ejecutar en hilo separado)"""
