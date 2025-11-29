@@ -150,6 +150,9 @@ Thumbs.db
 benchmark_results/
 benchmark_results_improved/
 benchmark_results_baseline/
+.resultados_vps/
+.resultados_nuevos/
+.benchmark_escalado/
 logs/
 
 
